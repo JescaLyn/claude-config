@@ -1,4 +1,8 @@
 # Memory Index
 
-- [reference_claude_code_extensibility.md](reference_claude_code_extensibility.md) — How commands, skills, subagents, and hooks differ; model override support across all three
-- [reference_custom_agent_invocation.md](reference_custom_agent_invocation.md) — How to spawn custom agents from .claude/agents/ via general-purpose workaround; parallel spawning; orchestrator requirements
+## Claude Code Reference
+- [reference_skills.md](reference_skills.md) — Creating custom skills/commands: frontmatter, invocation control, discovery issues, model overrides, "when to use what" decision guide (skills vs subagents vs hooks vs MCP)
+- [reference_bundled_skills.md](reference_bundled_skills.md) — Built-in skills to recommend: /batch, /simplify, /claude-api, /debug, /loop, /update-config, /keybindings-help
+- [reference_tools.md](reference_tools.md) — Built-in tools list (with subagent access flags), custom tools via MCP, permission system (deny > ask > allow)
+- [reference_hooks.md](reference_hooks.md) — Deterministic lifecycle automation: all 25+ events, four hook types (command/http/prompt/agent), matching, configuration, common patterns, gotchas
+- [reference_subagent_pipelines.md](reference_subagent_pipelines.md) — Building multi-agent workflows: constraints, tool access, model routing, error handling, prompt contracts, the general-purpose workaround, run-agent skill, known bugs, rate limits
