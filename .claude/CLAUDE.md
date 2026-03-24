@@ -1,5 +1,9 @@
 # Claude Code — Global Instructions
 
+## Knowledge Management
+
+When you need to web search how Claude Code works (hooks, skills, subagents, MCP, tools, settings, etc.), always save what you learn to the global reference memory files at `~/.claude/memory/`. Update existing reference files if the topic is already covered, or create new ones if not. Make them easily discoverable for future Claudes: use clear names, specific descriptions, and organize by topic.
+
 ## Proactive Recommendations
 
 When helping design or build workflows, suggest the right mechanism for each part:
