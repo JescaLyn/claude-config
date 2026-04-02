@@ -33,7 +33,7 @@ type: reference
 **MCP (Model Context Protocol)** is the only path for users to add genuinely new tools. MCP servers provide tools that appear alongside built-ins.
 
 - **Configuration**: `.mcp.json` (project scope, shareable via git) or `~/.claude.json` (user scope)
-- **Transport**: stdio, HTTP, SSE, or WebSocket
+- **Transport**: stdio, HTTP, or SSE (SSE deprecated; see `reference_mcp.md` for details)
 - **Deferred loading**: when MCP tools exceed ~10% of context window, they lazy-load via `ToolSearch` instead of consuming context upfront. This activates automatically.
 - **Subagent scoping**: define MCP servers inline in subagent `mcpServers` frontmatter so only subagents that need a server pay the context cost.
 

@@ -19,7 +19,7 @@ Hooks are shell scripts, HTTP endpoints, or single-turn Claude evaluations that 
 
 | Event | When it fires | Can block? |
 |-------|---------------|-----------|
-| **SessionStart** | Session begins or resumes | Yes |
+| **SessionStart** | Session begins or resumes | No |
 | **SessionEnd** | Session terminates | No |
 | **UserPromptSubmit** | User submits a prompt | Yes |
 | **PreToolUse** | Before any tool executes | Yes |
@@ -28,11 +28,11 @@ Hooks are shell scripts, HTTP endpoints, or single-turn Claude evaluations that 
 | **PermissionRequest** | Permission dialog appears | Yes |
 | **Stop** | Claude finishes responding | Yes |
 | **StopFailure** | Turn ends due to API error | No |
-| **SubagentStart** | Subagent spawned | Yes |
-| **SubagentStop** | Subagent finishes | No |
+| **SubagentStart** | Subagent spawned | No |
+| **SubagentStop** | Subagent finishes | Yes (forces continuation) |
 | **Notification** | Claude needs input or permission | No |
-| **InstructionsLoaded** | CLAUDE.md or rules loaded | Yes |
-| **PreCompact** | Before context compaction | Yes |
+| **InstructionsLoaded** | CLAUDE.md or rules loaded | No (observability only) |
+| **PreCompact** | Before context compaction | No |
 | **PostCompact** | After compaction completes | No |
 | **ConfigChange** | Config file changes during session | Yes |
 | **TaskCompleted** | Task marked complete | Yes |

@@ -134,4 +134,6 @@ When in doubt, start conservative and scale up.
 
 ### Experimental: Agent Teams
 
+**Last verified: 2026-03-22. Feature is in research preview — status may have changed.**
+
 Available in research preview (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code v2.1.32+). Teammates can message each other, claim tasks from a shared list, and coordinate without routing through the orchestrator. Model mixing is supported (no longer Opus-only; any model can be assigned per teammate). Consumes significantly more tokens than standard subagents. Known limitations: no session resumption with in-process teammates, task status can lag, one team per session, no nested teams, lead is fixed. Use subagents when tasks are independent and report-back-only; use Agent Teams when subtasks need inter-agent communication.
