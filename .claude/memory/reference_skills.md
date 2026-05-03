@@ -17,61 +17,106 @@ If both exist with the same name, the skill takes precedence. There is no behavi
 
 Use `.claude/skills/` for new work. `.claude/commands/` still works but is the legacy path.
 
+## Skill Storage Locations
+
+- **Enterprise**: Managed settings
+- **Personal**: `~/.claude/skills/<skill-name>/SKILL.md`
+- **Project**: `.claude/skills/<skill-name>/SKILL.md`
+- **Plugin**: `<plugin>/skills/<skill-name>/SKILL.md`
+
 ## Invocation Control
 
-| Frontmatter | User can invoke | Claude can invoke |
-|-------------|----------------|-------------------|
-| (defaults — no frontmatter) | Yes | Yes |
-| `disable-model-invocation: true` | **No** (broken) | **No** |
-| `user-invocable: false` | **No** (hidden from `/` menu) | Yes |
+| Frontmatter | User can invoke | Claude can invoke | Preloaded into subagents |
+|-------------|----------------|-------------------|--------------------------|
+| (defaults — no frontmatter) | Yes | Yes | Yes |
+| `disable-model-invocation: true` | Yes (via `/skill`) | **No** | **No** |
+| `user-invocable: false` | **No** (hidden from `/` menu) | Yes | Yes |
 
-There is currently **no working way to make a skill user-only** (user yes, Claude no). `disable-model-invocation: true` was intended for this but blocks both user and Claude invocation (#26251, closed NOT_PLANNED). Do not use it. If you need to discourage Claude from auto-invoking, omit the field and write a description that a user would recognize but Claude is unlikely to pattern-match against. For example, instead of `description: "Review code for quality issues"` (which Claude would match any time code review comes up), use `description: "Run my team's code review checklist — invoke with /review"` — the specific action framing and explicit invocation hint target human readers without triggering Claude's auto-invocation on generic code review requests.
+`disable-model-invocation: true` — only the user can invoke, description NOT in context, and skill content is NOT preloaded into subagents. Use when you want a user-only command that Claude won't auto-invoke and that shouldn't consume subagent context.
 
-**Key frontmatter fields**: `name`, `description`, `disable-model-invocation`, `user-invocable`, `argument-hint`, `allowed-tools`, `model`, `effort`, `context` (set to `fork` for isolated execution), `agent` (which subagent type when `context: fork`).
+`user-invocable: false` — only Claude can invoke (hidden from slash menu), description always in context. Use for orchestration primitives that Claude should call but users shouldn't.
 
-**Known bug:** `allowed-tools` is not enforced at runtime. See the "`allowed-tools` Bug" section below for details and workarounds.
+**Key frontmatter fields**: `name`, `description`, `argument-hint`, `arguments` (positional args for `$name` substitution), `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `effort`, `context` (isolated execution — see `context: fork` below), `agent` (subagent type when `context: fork`), `hooks`, `paths` (glob pattern or YAML list of globs limiting when skill activates), `shell` ("bash" (default) or "powershell" for `` !`command` `` blocks).
 
-Arguments via `$ARGUMENTS`, `$0`, `$1` placeholders. Shell substitution via `` !`command` `` (arguments interpolated before shell runs).
+**String substitutions**: `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N`, `$name`, `${CLAUDE_SESSION_ID}`, `${CLAUDE_SKILL_DIR}` (absolute path to the skill's directory), `${CLAUDE_EFFORT}` (current effort level).
+
+Shell substitution: `` !`command` `` runs after argument interpolation. For multi-line shell output, use a fenced code block opened with ` ```! `. Disable shell execution with `disableSkillShellExecution: true` in settings.
 
 ## Skill Discovery and the "Overlooking" Problem
 
-**Last verified: 2026-03-22. Bug status may have changed — check GitHub before relying on this.**
-
 Claude discovers skills via description matching, not explicit registration. Known issues:
-- Skills failing to load from `~/.claude/skills/` (GitHub #25072)
-- Skills loaded into context but `/skills` showing "No skills found" (GitHub #14851)
-- Claude not invoking available skills when it should (GitHub #9716)
+- Skills failing to load from `~/.claude/skills/` (GitHub #25072, closed stale — fix unverified)
+- Skills loaded into context but `/skills` showing "No skills found" (GitHub #14851, closed)
+- Claude not invoking available skills when it should (GitHub #9716, **OPEN**, 69+ comments; also #51099 — Opus 4.7 ignoring skills)
 
 **Mitigations**:
 - **Description quality is the primary lever.** Write descriptions that match what users naturally say. Include keywords.
 - **System-reminder mechanism** lists available skills by name and description at session start. This helps but doesn't guarantee invocation.
-- **Context budget**: skill descriptions get ~2% of context window (~16KB min). If you exceed this, some skills are excluded; `/context` will warn.
-- **No way to force invocation.** Hooks can't make Claude use a skill. CLAUDE.md mentions help as reminders but invocation remains a judgment call.
+- **Context budget**: skill descriptions get 1% of context window, capped at 1,536 characters per entry. Exceeding the budget excludes some skills; `/context` will warn.
+- **No way to force invocation.** Hooks can't make Claude use a skill. CLAUDE.md reminders help but invocation remains a judgment call.
 - **Test with realistic requests**, not just the skill name. Iterate on descriptions until auto-invocation works reliably.
 
-## `allowed-tools` Bug
+## `/skills` UI
 
-**Last verified: 2026-03-22. Bug status may have changed — check GitHub before relying on this.**
+The `/skills` panel includes a type-to-filter search box for finding skills by name. Pressing Enter pre-fills `/<skill-name>` in the prompt rather than closing the dialog.
 
-The `allowed-tools` frontmatter field is parsed but **not enforced at runtime** (bugs #14956, #18837, unresolved as of 2026-03). A skill declaring `allowed-tools: [Read, Grep, Glob]` will still have access to all tools available in the conversation context.
+## Live Change Detection
 
-This is a skill-specific bug — agent `tools:` restrictions work correctly when spawning native subagent types. The distinction matters:
-- **Skill** `allowed-tools` → broken, no enforcement
-- **Agent** `tools:` → works for native spawning, bypassed by the general-purpose workaround
+Skills created or modified in `~/.claude/skills/` or `.claude/skills/` take effect immediately within the current session — no restart needed. `--dangerously-skip-permissions` does not prompt for writes to `.claude/skills/`, `.claude/agents/`, or `.claude/commands/`.
 
-**Workarounds:**
-- **PreToolUse hooks** can reject tool calls that a skill shouldn't make. This is the most reliable enforcement mechanism.
-- **Prompt instructions** ("You may only use Read and Grep") reduce unwanted tool use but are not hard constraints.
-- If the skill runs in a forked context (`context: fork`), it becomes a subagent and the agent `tools:` field applies instead — but only for native spawning, not general-purpose.
+## Skill Content on Compaction
+
+When the conversation is compacted, the first 5,000 tokens of each previously-invoked skill are re-attached to the compacted context. All re-attached skill content shares a 25,000-token budget. Skills invoked before auto-compaction are not re-executed against the next user message.
+
+## Behavioral Notes
+
+### `context: fork`
+
+`context: fork` and `agent:` frontmatter fields are supported. Skills with `context: fork` run in an isolated subagent context without conversation history. The `agent:` field specifies which subagent type (built-in: Explore, Plan, general-purpose; or custom from `.claude/agents/`), defaulting to `general-purpose`.
+
+Plugin skills honor `context: fork` and `agent:`. Deferred tools (WebSearch, WebFetch, etc.) are available to `context: fork` subagents on their first turn.
+
+### `allowed-tools`
+
+Restricts the skill's own main-context calls only — does not propagate into subagents the skill spawns. For cross-context enforcement, use `settings.json` PreToolUse hooks (fire in all contexts including subagents).
 
 ## Model Overrides
 
 Skills, commands, and subagents all support a `model` frontmatter field that overrides the session model. Valid values: `sonnet`, `opus`, `haiku`, or a full model ID. Subagents also accept `inherit` (the default).
 
+## Skill Orchestration: Full Multi-Agent Pipelines
+
+**Skills are full orchestrators.** Because skills run in main conversation context, they have access to the `Agent()` tool and can spawn multiple agents in parallel, collect results, validate output quality, and dispatch conditional follow-up work. This is how `/custom-review` works: stages → spawn reviewer → conditionally dispatch fixes → propose commit message.
+
+**Hierarchy:** Skills (main context) CAN spawn agents; those agents cannot spawn further agents. See `reference_subagent_pipelines.md` for detailed subagent constraints.
+
+**Example orchestration pattern:**
+```
+Skill invocation (main context):
+  1. Spawn Agent(phase-1-a), Agent(phase-1-b), Agent(phase-1-c) in parallel
+  2. Collect all results
+  3. Validate outputs, gate on quality
+  4. Spawn Agent(phase-2) with aggregated phase-1 data
+  5. Return final assembled result
+```
+
+## Skill-to-Skill Composition
+
+Skills run in main context and have access to the Skill tool, so a SKILL.md can include "then invoke /other-skill" and Claude will use the Skill tool to do so.
+
+Subagents spawned via Agent() do not have the Skill tool. To pass skill logic into a subagent, use the `skills:` frontmatter field to preload skill content as static instructions.
+
+## Known Bugs — ToolSearch Regression
+
+**GitHub #47598 (OPEN).** Custom agents (`.claude/agents/`) lost access to `MCPSearch` (formerly `ToolSearch`), blocked by a hardcoded `CUSTOM_AGENT_DISALLOWED_TOOLS` list. This breaks access to deferred MCP tools in custom agents. **Workaround:** Set `ENABLE_TOOL_SEARCH=false` to force all MCP tools to load upfront (context cost), or keep total MCP tool descriptions under ~10K tokens so deferral doesn't trigger. Note: `MCPSearch` auto-mode is on by default when MCP tool descriptions exceed 10% of the context window.
+
 ## When to Use What
 
 - **User needs to trigger a workflow** -> Skill with slash command (default invocation settings)
 - **Claude/orchestrator needs reusable prompt logic** -> Skill with `user-invocable: false`
-- **Need isolated execution or parallel spawning** -> Subagent (Agent tool)
+- **User-only command, never auto-invoked, not in subagent context** -> Skill with `disable-model-invocation: true`
+- **Skill needs to invoke another skill** -> Include "then invoke /skill-name" in SKILL.md body; works from main context
+- **Need full multi-agent orchestration (parallel fan-out, gating, sequential phases)** -> Skill that spawns multiple Agent() calls and gates on results
+- **Need isolated work without orchestration overhead** -> Raw Agent() call from main context (one agent, per-task)
 - **Need deterministic automation on events** -> Hook (see `reference_hooks.md` for full guide)
 - **Need genuinely new tool capabilities** -> MCP server

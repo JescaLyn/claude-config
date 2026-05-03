@@ -4,6 +4,10 @@ description: Compaction (auto/manual, hooks, what survives), context windows by 
 type: reference
 ---
 
+## What Claude Sees vs. Doesn't
+
+HTML block comments (`<!-- ... -->`) are stripped from all instruction files (CLAUDE.md, rules, agents, skills) before injection to the model. Visible when reading files with the Read tool, invisible to Claude during normal operation. Useful for annotating files with metadata or maintainer notes.
+
 ## Context Compaction
 
 ### /compact
@@ -14,17 +18,22 @@ Summarizes conversation history, replacing full transcript with a condensed vers
 - Key intent, direction, and conclusions preserved; detailed tool outputs and early instructions may be lost
 
 ### Auto-compaction
-Triggers automatically when context fills up. Clears older tool outputs first, then summarizes if needed.
+Triggers automatically when context fills up. Clears older tool outputs first, then summarizes if needed. Circuit breaker stops retrying after 3 consecutive failures.
+
+**Skill reattachment after compaction**: the most recently invoked skills are re-attached automatically — first 5,000 tokens each, 25,000-token combined budget. Skill character budget scales with context window (2% of context), so larger context windows surface more skill descriptions without truncation.
 
 **Best practice**: put persistent rules in CLAUDE.md, not conversation history — they survive compaction.
 
 ### Hooks
 
+Hook output over 50K characters is saved to disk with a file path + preview instead of being injected directly into context.
+
 | Hook | Matcher values | Can block? | Key input fields |
 |------|---------------|------------|------------------|
-| **PreCompact** | `manual`, `auto` | No (can perform side effects) | `trigger`, `custom_instructions` |
+| **PreCompact** | `manual`, `auto` | Yes (exit code 2 cancels compaction) | `trigger`, `custom_instructions` |
 | **PostCompact** | `manual`, `auto` | No | `trigger`, `compact_summary` |
 | **SessionStart** | `compact` | No | `source: "compact"` — fires when session resumes after compaction; can inject `additionalContext` via `hookSpecificOutput` |
+| **InstructionsLoaded** | (no matcher) | No | Fires when CLAUDE.md or `.claude/rules/*.md` files are loaded into context |
 
 ## /clear vs /compact
 
@@ -40,11 +49,12 @@ Triggers automatically when context fills up. Clears older tool outputs first, t
 
 | Model | Default | Extended |
 |-------|---------|----------|
+| **Opus 4.7** | 200K | 1M (Max, Team, Enterprise, API) |
 | **Opus 4.6** | 200K | 1M (Max, Team, Enterprise, API) |
-| **Sonnet 4.6** | 200K | 1M (Max, Team, Enterprise, API) |
+| **Sonnet 4.6** | 200K | 1M (Max plan; extra usage on Pro/API) |
 | **Haiku 4.5** | 200K | N/A |
 
-On Max/Team/Enterprise plans, Opus auto-upgrades to 1M with no configuration. Use `/context` to inspect current usage.
+On Max/Team/Enterprise plans, Opus auto-upgrades to 1M with no configuration. Use `/context` to inspect current usage. Set `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` to opt out of 1M context support.
 
 ## Git Worktrees
 
@@ -55,8 +65,11 @@ On Max/Team/Enterprise plans, Opus auto-upgrades to 1M with no configuration. Us
 - **No changes made**: worktree and branch removed automatically on exit
 - **Changes exist**: Claude prompts to keep or remove; keeping preserves directory and branch
 
+### Sparse checkout
+`worktree.sparsePaths` setting limits checkout to specified directories in large monorepos, using git sparse-checkout. Example: `worktree.sparsePaths: ["src/api", "packages/auth"]`.
+
 ### Subagent isolation
-`isolation: "worktree"` on the Agent tool gives each subagent its own worktree for parallel work without file conflicts. Auto-cleaned when subagent finishes without changes.
+`isolation: "worktree"` on the Agent tool (or agent definition) gives each subagent its own worktree for parallel work without file conflicts. Auto-cleaned when subagent finishes without changes. Worktrees left behind after interrupted parallel runs are also cleaned up automatically.
 
 ### Worktree hooks
 - **WorktreeCreate**: fires when worktree created; can provide custom creation logic (supports non-git VCS)
@@ -74,6 +87,8 @@ Read-only permission mode: Claude reads files, runs exploratory shell commands, 
 **When to use**: multi-step implementation planning, code exploration before changes, iterating on direction before committing to edits.
 
 Permission prompts for Bash/network still appear as in default mode — plan mode only restricts file edits.
+
+**"Clear context" on plan accept**: hidden by default. Restore with `"showClearContextOnPlanAccept": true` in settings.
 
 ## Scheduling
 
@@ -93,12 +108,17 @@ Permission prompts for Bash/network still appear as in default mode — plan mod
 - **CronDelete**: cancel by ID
 - Limit: 50 scheduled tasks per session
 
-### Cloud-scheduled: /schedule
-Runs on Anthropic infrastructure via claude.ai/code:
-- Survives machine restarts
-- Minimum 1-hour interval
-- Configurable repository/branch permissions
-- MCP integrations via connectors
+### Cloud-scheduled: /schedule (Routines)
+Runs on Anthropic-managed cloud infrastructure. Manage at `claude.ai/code/routines`.
+
+**Three trigger types:**
+- **Schedule**: cron-based; hourly/daily/weekdays/weekly presets; custom cron via `/schedule update`; minimum 1-hour interval
+- **API trigger**: per-routine HTTP endpoint + bearer token; POST to `/fire` endpoint with optional `text` body; returns session ID + URL. Under `experimental-cc-routine-2026-04-01` beta header.
+- **GitHub trigger**: reacts to `pull_request` or `release` events; requires Claude GitHub App on repo; filter by author, title, labels, draft state, branch, or regex.
+
+Available on Pro, Max, Team, Enterprise with Claude Code on web enabled. Research preview status. Runs without permission prompts — scope via repositories, environment, and connectors.
+
+**Features:** exit confirmation for one-shot tasks; `/resume` can restart scheduled tasks; stuck task notifications after ~45s.
 
 ### Desktop-scheduled
 Via Claude desktop app; minimum 1-minute interval; requires app running.
@@ -108,13 +128,20 @@ Via Claude desktop app; minimum 1-minute interval; requires app running.
 ### Storage
 Sessions saved as `.jsonl` files in `~/.claude/projects/`, organized by directory hash. Default cleanup: 30 days (`cleanupPeriodDays` setting).
 
-**Known bug**: `cleanupPeriodDays: 0` disables transcript writing entirely (#23710). Use `99999` to preserve indefinitely.
+`cleanupPeriodDays` now also covers `~/.claude/tasks/`, `~/.claude/shell-snapshots/`, and `~/.claude/backups/` — not just session files.
+
+**`cleanupPeriodDays: 0`** is now rejected with a validation error (previously silently disabled transcript persistence). Use `99999` to preserve indefinitely.
 
 ### Resume commands
-- `claude --continue` — most recent conversation in current directory
+- `claude --continue` — most recent conversation in current directory (also finds sessions that added the current dir via `/add-dir`)
 - `claude --resume` — interactive picker
 - `claude --resume session-name` — by name/ID
 - `claude --from-pr 123` — sessions linked to a PR
+
+`/resume` and `--resume` on large sessions offer to summarize stale sessions before re-reading them. Large session load is significantly faster (up to 67% on 40MB+ sessions).
+
+### /recap
+Provides a context summary when returning to a session after being away. Configurable in `/config`; invoke manually with `/recap`. Force-enable with `CLAUDE_CODE_ENABLE_AWAY_SUMMARY` env var if telemetry is disabled.
 
 ### Naming
 - At startup: `claude -n auth-refactor`
@@ -138,8 +165,19 @@ Every file edit is snapshotted before applying. Local to session, separate from 
 
 ## Context Monitoring
 
+**Startup token budget** (approximate, before first prompt):
+| Component | Tokens | Notes |
+|-----------|--------|-------|
+| System prompt | ~4,200 | Auto-loaded, invisible |
+| Auto memory (MEMORY.md) | ~680 | First 200 lines / 25KB |
+| Environment info | ~280 | Auto-loaded |
+| MCP tool definitions | ~120 | Deferred by default via `ToolSearch`; `ENABLE_TOOL_SEARCH=auto` loads upfront when within 10% of context; `=false` loads all upfront |
+| Skill descriptions | ~450 | Auto-loaded at startup |
+| **Total** | **~8K+** | Before first prompt |
+
 - `/context` — inspect what's consuming context space
 - `/mcp` — per-server context costs
-- `/cost` — token usage and spend
-- Skills load descriptions only at startup; full content loads on invocation
+- `/usage` — token usage and spend (merged from `/cost` and `/stats`; both still work as shortcuts to the relevant tab)
+- MCP tool definitions: deferred by default, loaded on demand via `ToolSearch`
+- Skills: descriptions visible at session start; full content loads only on invocation; re-attached after auto-compaction (5K tokens/skill, 25K combined budget)
 - Subagents get independent context windows — their work doesn't bloat parent

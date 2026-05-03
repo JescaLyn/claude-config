@@ -37,9 +37,9 @@ If both `./CLAUDE.md` and `./.claude/CLAUDE.md` exist, `./CLAUDE.md` takes prece
 
 All applicable CLAUDE.md files load and merge — Claude sees all of them in context. When instructions conflict, this authority hierarchy applies:
 
-**Managed > Project > User**
+**Managed > CLI args > Local project > Shared project > User**
 
-Managed wins because it's enforced org policy (cannot be excluded). Project wins over User because it's scoped to the codebase you're working in. Rules files from all scopes also merge (concatenated).
+Managed wins because it's enforced org policy (cannot be excluded). Local project overrides shared project (gitignored local overrides committed config). Project wins over User because it's scoped to the codebase you're working in. Rules files from all scopes also merge (concatenated).
 
 ### Exclusion Mechanism
 
@@ -58,7 +58,7 @@ Cannot exclude managed policy. Patterns match absolute file paths via glob synta
 
 ### Additional Directories
 
-The `--add-dir /path/to/other/repo` CLI flag gives Claude read/write access to directories outside the main project. By default, CLAUDE.md files in those extra directories are NOT loaded (you may add a directory just to read files, not to adopt its instructions). Set `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` in your shell environment or in `settings.json` `env` field to opt into loading them.
+`--add-dir /path` gives read/write access to external directories. Their CLAUDE.md files are NOT loaded by default. Set `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` to opt in.
 
 ## The Include Directive
 
@@ -120,6 +120,33 @@ Fires when any CLAUDE.md or rules file loads. **Observability only — cannot bl
 | `compact` | Re-load after `/compact` |
 
 Hook input includes: `file_path`, `memory_type` (`"User"`, `"Project"`, `"Local"`, `"Managed"`), `load_reason`, `globs` (for path matches), `trigger_file_path` (for lazy loads), `parent_file_path` (for includes).
+
+## AGENTS.md Interop
+
+If the project also needs to support other AI tools (Cursor, Codex, etc.) that read `AGENTS.md`, use the include directive to avoid duplication: add `@AGENTS.md` to `CLAUDE.md`, or `@CLAUDE.md` to `AGENTS.md`.
+
+## Skills
+
+Skills are stored at:
+- `~/.claude/skills/<skill-name>/SKILL.md` (user-global)
+- `.claude/skills/<skill-name>/SKILL.md` (project)
+
+Frontmatter `context: fork` runs the skill in an isolated subagent rather than inline.
+
+## Hooks
+
+Hooks can be defined in any of:
+- `~/.claude/settings.json` — all projects
+- `.claude/settings.json` — single project (shared)
+- `.claude/settings.local.json` — single project (gitignored)
+- Plugin `hooks/hooks.json` — active when the plugin is enabled
+- Skill/Agent frontmatter — active while the component is loaded
+
+`/config` settings (theme, editor mode, verbose, etc.) persist to `~/.claude/settings.json` and participate in the full precedence stack.
+
+WSL on Windows can inherit Windows-side managed settings via `wslInheritsWindowsSettings`.
+
+`blockedMarketplaces` and `strictKnownMarketplaces` are enforced on all plugin operations (install, update, refresh, autoupdate).
 
 ## What Belongs Where
 

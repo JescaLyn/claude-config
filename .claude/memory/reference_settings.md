@@ -13,7 +13,9 @@ type: reference
 | **Project** | `.claude/settings.json` | Yes (git-tracked) | Team-shared config |
 | **Local** | `.claude/settings.local.json` | No (gitignored) | Personal overrides for this project |
 
-Managed file locations: macOS `/Library/Application Support/ClaudeCode/managed-settings.json`, Linux/WSL `/etc/claude-code/`, Windows `C:\Program Files\ClaudeCode\`.
+Managed file locations: macOS `/Library/Application Support/ClaudeCode/managed-settings.json`, Linux/WSL `/etc/claude-code/`, Windows `C:\Program Files\ClaudeCode\`. Also supports a `managed-settings.d/` drop-in directory for distributing settings as separate fragment files (merged alphabetically).
+
+MDM/OS-level policy delivery also supported: macOS plist `com.anthropic.claudecode`, Windows registry `HKLM\SOFTWARE\Policies\ClaudeCode`.
 
 ## Precedence
 
@@ -34,44 +36,88 @@ This means:
 
 ### Permissions & Security
 - `permissions.allow`, `permissions.deny`, `permissions.ask` — tool permission rules (see `reference_tools.md`)
-- `permissions.defaultMode` — `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`
+- `permissions.defaultMode` — `default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`
+- `autoMode.*` — configures the `auto` mode classifier: `autoMode.environment`, `autoMode.allow`, `autoMode.soft_deny`
+  - `autoMode.allow` and `autoMode.soft_deny` support the `$defaults` sentinel, which expands to the built-in default rule set
 - `permissions.additionalDirectories` — extra working directories
+- `disableBypassPermissionsMode` — (managed only) prevent bypassing permissions
+- `skipDangerousModePermissionPrompt` — suppress the confirmation prompt when entering bypass/dangerous mode
 
 ### Hooks
 - `hooks` — lifecycle automation config (see `reference_hooks.md`)
+- `allowedHttpHookUrls` — whitelist URLs for HTTP hooks
 - `disableAllHooks` — disable all hooks and status line
 - `allowManagedHooksOnly` — (managed only) suppress non-managed hooks
 
 ### Model & Effort
-- `model` — override default model
+- `model` — override default model; `/model` selections persist across restarts even when a project pins a different model
 - `availableModels` — restrict which models can be selected
-- `effortLevel` — persist across sessions: `low`, `medium`, `high`
+- `effortLevel` — persist across sessions: `low`, `medium`, `high`, `xhigh` (Opus 4.7), `max`. Default is `high` for API-key, Bedrock/Vertex/Foundry, Team, Enterprise users.
+- `alwaysThinkingEnabled` — enable extended thinking by default (boolean)
+- `modelOverrides` — map Anthropic model IDs to provider-specific IDs
 
 ### Environment
-- `env` — environment variables applied to every session
-- `apiKeyHelper` — script to generate auth values
+- `env` — environment variables applied to every session (values must be strings)
+- `apiKeyHelper` — script to generate auth values (runs in `/bin/sh`, must output API key to stdout)
 
 ### Sandbox
 - `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed`
+- `sandbox.failIfUnavailable` — fail startup if sandbox cannot be initialized
+- `sandbox.excludedCommands` — commands excluded from sandboxing
 - `sandbox.filesystem.*` — read/write path allowlists and denylists
-- `sandbox.network.*` — domain allowlists, proxy config, Unix sockets
+- `sandbox.network.*` — domain allowlists, proxy config, Unix sockets, `sandbox.network.deniedDomains` (block specific domains)
 
 ### MCP Servers
 - `enableAllProjectMcpServers` — auto-approve MCP servers from `.mcp.json`
 - `enabledMcpjsonServers` / `disabledMcpjsonServers` — per-server approval
 
+### Plugins
+- `enabledPlugins` — toggle plugins on/off
+- `extraKnownMarketplaces` — add custom plugin sources
+- `strictKnownMarketplaces` — (managed only) restrict installs to approved sources
+- `blockedMarketplaces` — (managed only) block specific sources; enforced on install, update, refresh, and autoupdate
+
 ### UI & Display
 - `outputStyle`, `statusLine`, `language`
 - `spinnerTipsEnabled`, `spinnerVerbs`
+- `tui` — terminal UI renderer: `"fullscreen"` or `"default"`
+- `viewMode` — output verbosity: `"default"`, `"verbose"`, or `"focus"`
+- `showTurnDuration` — show turn duration messages (boolean)
+- `showThinkingSummaries` — show/hide thinking block summaries (boolean, disabled by default)
+- `prUrlTemplate` — custom URL template for the footer PR badge (instead of github.com)
+- `companyAnnouncements` — messages shown at startup (managed scope only)
+
+### Voice
+- `voice` — push-to-talk dictation config object: `{enabled: true, mode: "tap"}`; dictation respects the `language` setting
 
 ### Git & Attribution
 - `attribution.commit`, `attribution.pr` — custom attribution text
+- `includeGitInstructions` — include built-in commit/PR workflow instructions in system prompt (boolean; also controllable via `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` env var)
+
+### Agents
+- `agent` — run the main thread as a named subagent
+
+### Worktrees
+- `worktree.symlinkDirectories` — directories to symlink in worktrees
+- `worktree.sparsePaths` — directories for git sparse-checkout in worktrees
+
+### Updates
+- `autoUpdatesChannel` — `"stable"` or `"latest"`
+- `minimumVersion` — floor version; prevents downgrades below this version
+
+### File Picker
+- `respectGitignore` — respect `.gitignore` in the `@`-mention file picker (boolean)
+- `defaultShell` — `"bash"` or `"powershell"` (shell selection); also accepts `"normal"` or `"vim"` to control input prompt editor mode
+
+### Network & Fetch
+- `skipWebFetchPreflight` — skip the WebFetch domain safety preflight check (boolean)
 
 ### Other
-- `cleanupPeriodDays` — session cleanup (default 30; 0 disables persistence)
+- `cleanupPeriodDays` — cleanup period for `~/.claude/tasks/`, `~/.claude/shell-snapshots/`, and `~/.claude/backups/` (default 30; setting `0` is rejected with a validation error)
 - `plansDirectory` — where plan files live (default `~/.claude/plans`)
-- `voiceEnabled` — push-to-talk dictation
-- `autoMemoryDirectory` — custom memory storage location
+- `autoMemoryDirectory` — custom memory storage location (user/local/policy scopes only — NOT project settings, security restriction)
+- `forceRemoteSettingsRefresh` — (managed only) block startup until remote settings fetch completes (boolean)
+- `disableSkillShellExecution` — disable `` !`command` `` shell preprocessing in skills from user/project/plugin sources (bundled/managed skills unaffected)
 
 ## JSON Format Examples
 
@@ -91,8 +137,15 @@ Settings whose structure isn't obvious from the key name. For `hooks` and `permi
     "commit": "Generated by Claude Code",
     "pr": "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
   },
+  "voice": { "enabled": true, "mode": "tap" },
+  "tui": "fullscreen",
+  "viewMode": "verbose",
+  "autoMode": {
+    "soft_deny": ["$defaults", "Bash(rm*)"]
+  },
   "sandbox": {
     "enabled": true,
+    "failIfUnavailable": true,
     "autoAllowBashIfSandboxed": true,
     "filesystem": {
       "allowWrite": ["/tmp", "./dist"],
@@ -111,8 +164,6 @@ Settings whose structure isn't obvious from the key name. For `hooks` and `permi
 }
 ```
 
-`apiKeyHelper` runs in `/bin/sh` and must output the API key to stdout. `env` values must be strings.
-
 ## Managed-Only Fields
 
 These settings only work in the managed scope:
@@ -121,11 +172,14 @@ These settings only work in the managed scope:
 - `allowedMcpServers`, `deniedMcpServers`
 - `sandbox.network.allowManagedDomainsOnly`, `sandbox.filesystem.allowManagedReadPathsOnly`
 - `strictKnownMarketplaces`, `blockedMarketplaces`, `pluginTrustMessage`
-- `channelsEnabled`
+- `channelsEnabled`, `allowedChannelPlugins`
+- `allowManagedChannelPlugins` (alias pattern; same enforcement scope)
+- `wslInheritsWindowsSettings`
+- `forceRemoteSettingsRefresh`
 
 ## Viewing and Modifying
 
-- `/config` opens the settings UI
+- `/config` (alias: `/settings`) opens the settings UI; settings (theme, editor mode, verbose, etc.) persist to `~/.claude/settings.json` and participate in the full precedence stack
 - `/status` shows active settings sources and their origins
 - `/update-config` skill for modifying settings.json programmatically
 - `/permissions` for viewing and modifying permission rules

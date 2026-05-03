@@ -1,12 +1,12 @@
 ---
 name: Bundled skills to recommend to users
-description: "Built-in prompt-based skills: /batch, /simplify, /claude-api, /debug, /loop, /update-config, /keybindings-help — when to recommend each"
+description: "Bundled skills and built-in commands: /batch, /simplify, /claude-api, /debug, /loop, /update-config, /fewer-permission-prompts, /keybindings-help, /effort, /theme, /reload-plugins — when to recommend each"
 type: reference
 ---
 
 ## Bundled Skills vs Built-in Commands
 
-**Built-in commands** (`/clear`, `/compact`, `/cost`, `/help`, `/model`, `/context`, `/memory`, `/permissions`, `/settings`, `/hooks`, etc.) are fixed-logic operations hardcoded into the CLI. They cannot be customized and do not use the Skill tool.
+**Built-in commands** (`/clear`, `/compact`, `/config`, `/usage`, `/help`, `/model`, `/context`, `/memory`, `/permissions`, `/settings`, `/hooks`, `/skills`, etc.) are fixed-logic operations hardcoded into the CLI. They cannot be customized and do not use the Skill tool. `/skills` has a type-to-filter search box. `--dangerously-skip-permissions` skips write prompts for `.claude/skills/`, `.claude/agents/`, and `.claude/commands/`.
 
 **Bundled skills** are prompt-based: they give Claude a detailed playbook and let it orchestrate work using its tools. They can spawn subagents, read files, run shell commands, and adapt to codebase context. Invoked via the Skill tool (by Claude) or `/name` (by user).
 
@@ -20,6 +20,10 @@ type: reference
 | `/debug` | Read the session debug log to troubleshoot Claude Code behavior | Claude seems stuck, produces inconsistent output, or behaves unexpectedly |
 | `/loop` | Run a prompt repeatedly on an interval (default 10m) while the session stays open | "check if the deploy finished every 5m", any polling or monitoring need |
 | `/update-config` | Configure settings.json: permissions, hooks, env vars, automated behaviors | "change permissions", "add a hook", "set env var", any settings.json change |
+| `/fewer-permission-prompts` | Scan transcripts for common read-only Bash/MCP calls, add prioritized allowlist to `.claude/settings.json` | "too many permission prompts", "reduce interruptions", "auto-allow common tools" |
 | `/keybindings-help` | Help with keyboard shortcuts and keybindings.json | "rebind keys", "add a chord shortcut", "customize keybindings" |
+| `/effort` | Set reasoning effort level (low/medium/high/xhigh); opens interactive slider with no arguments; skill content can reference `${CLAUDE_EFFORT}` | "increase thinking", "use xhigh effort", any reasoning-intensity tuning |
+| `/theme` | Apply or create a custom color theme | "change theme", "dark mode", "custom colors" |
+| `/reload-plugins` | Reload plugins and auto-install any missing plugin dependencies | plugin errors, after adding a plugin, dependency issues |
 
-Not all bundled skills appear in every session. Availability may differ between CLI and VS Code extension, and some (like `/claude-api`) auto-activate based on context.
+Not all bundled skills appear in every session. Availability may differ between CLI and VS Code extension; some (like `/claude-api`) auto-activate based on context.
