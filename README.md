@@ -4,7 +4,7 @@ Global Claude Code configuration that gives Claude persistent knowledge of its o
 
 ## Get Started
 
-Claude Code loads rules from `~/.claude/rules/` and memory from `~/.claude/memory/` at session start.
+Claude Code loads rules from `~/.claude/rules/`, memory from `~/.claude/memory/`, and skills from `~/.claude/skills/` at session start.
 
 ### Option A: Use as your Claude config
 
@@ -26,10 +26,13 @@ If you already have a `~/.claude/` directory, copy the contents in:
 # Copy memory files (reference materials for Claude Code features)
 cp -r claude-config/.claude/memory/* ~/.claude/memory/
 
-# Copy rules
+# Copy rules (global behaviors and constraints)
 cp -r claude-config/.claude/rules/* ~/.claude/rules/
 
-# Copy skills
+# Copy agents (agent capability cards and identity)
+cp -r claude-config/.claude/agents/* ~/.claude/agents/
+
+# Copy skills (custom slash commands)
 cp -r claude-config/.claude/skills/* ~/.claude/skills/
 ```
 
