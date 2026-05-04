@@ -11,10 +11,10 @@ type: reference
 | `low` | Minimal thinking; mechanical/extraction work | — |
 | `medium` | Moderate thinking; analytical tasks | Free tier (Opus 4.6 / Sonnet 4.6) |
 | `high` | Deep reasoning; code analysis, multi-step work | Pro/Max (Opus 4.6 / Sonnet 4.6) |
-| `xhigh` | Between high and max | **Default for Opus 4.7**; other models fall back to `high` |
+| `xhigh` | Between high and max | **Default for Opus 4.7**; Opus 4.6 / Sonnet 4.6 / Haiku 4.5 fall back to `high` |
 | `max` | Extended thinking; critical synthesis and judgment | Session-only; Opus models only |
 
-**Supported models:** Opus 4.7, Opus 4.6, Sonnet 4.6. Haiku 4.5 does not support extended thinking.
+**Supported models:** Opus 4.7, Opus 4.6, Sonnet 4.6, Haiku 4.5. Haiku 4.5 does not support `xhigh`; falls back to `high`. Use `effort: low` on Haiku agents for mechanical/extraction work to suppress thinking.
 
 ## Adaptive Reasoning
 

@@ -34,9 +34,9 @@ Choose dynamic when tasks vary in duration. Choose explicit batches when you nee
 
 Sonnet, Opus, and Haiku have separate rate limit pools at the model family level. Versions within a family share a pool (e.g., Opus 4.6 and Opus 4.5 share the Opus pool). Routing subagents across families lets you draw from independent pools in parallel.
 
-- **Haiku**: file walks, grep, dependency scanning, config extraction, structured data extraction, any deterministic read-only work
-- **Sonnet**: code analysis, security review, structured reasoning, multi-step extraction
-- **Opus**: synthesis, judgment, credibility assessment, final report generation. Use sparingly; significantly more expensive than Sonnet.
+- **Haiku + `effort: low`**: file walks, grep, dependency scanning, config extraction, structured data extraction, any deterministic read-only work. Always pair with `effort: low` — without it, Haiku still runs extended thinking and wastes tokens on mechanical work.
+- **Sonnet + `effort: medium`**: code analysis, security review, structured reasoning, multi-step extraction.
+- **Opus + `effort: high`**: synthesis, judgment, credibility assessment, final report generation. Use sparingly; significantly more expensive than Sonnet.
 
 ## Error Handling
 
@@ -61,7 +61,7 @@ Every subagent prompt must specify:
 Key fields for custom agent configs (`.claude/agents/<name>.md`):
 
 - `tools`: Restrict tool access (e.g., `tools: Read Grep Edit`)
-- `model`: Route by task complexity (`haiku` for mechanical, `sonnet` for analytical, `opus` for synthesis)
+- `model`: Route by task complexity — see Model Routing section above
 - `effort`: Per-agent effort override (see Effort Configuration below)
 - `skills`: Preload skills into the subagent. Sources: `from-user` (global `~/.claude/skills/`) or `from-project` (`.claude/skills/`).
 
@@ -69,9 +69,15 @@ Key fields for custom agent configs (`.claude/agents/<name>.md`):
 
 See `reference_thinking.md` for levels, defaults by plan, and Haiku limitations.
 
-- Set `effort: low` for mechanical/extraction work regardless of model.
-- Set `effort: medium` for analytical work. Only go higher if quality visibly suffers.
-- Reserve `effort: high` or `max` for final synthesis where reasoning depth directly affects output quality.
+| Task type | Model | Effort |
+|-----------|-------|--------|
+| File walks, grep, extraction, config parsing | `haiku` | `low` |
+| Code analysis, reasoning, multi-step extraction | `sonnet` | `medium` |
+| Synthesis, judgment, final reports | `opus` | `high` |
+
+- `effort: low` suppresses thinking entirely. Omit it and Haiku still incurs thinking tokens on mechanical work.
+- The table shows default pairings. `effort: low` applies to any mechanical task regardless of model.
+- Only raise above `medium` if output quality visibly suffers.
 - In `settings.json` the key is `effortLevel`; in subagent/skill frontmatter it is `effort`.
 
 ## Patterns
@@ -145,6 +151,7 @@ The criterion is total token cost, not local scope. Forking is only an optimizat
 ## Cost Management
 
 - Use `/usage` before and after pipeline execution. Log the delta.
+- Set `effort: low` on all Haiku agents. Without it in frontmatter, Haiku inherits the session effort level and incurs thinking tokens even for file walks.
 - Use `/compact` and `/clear` between pipeline runs to prevent context accumulation.
 - If Haiku subagents are failing and being re-run on Sonnet, track whether model routing is actually saving budget.
 - Strip unused MCP servers before pipeline runs. Define MCP servers inline in the subagent's `mcpServers` frontmatter field rather than globally.

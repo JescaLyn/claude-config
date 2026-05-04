@@ -42,6 +42,8 @@ Use `.claude/skills/` for new work. `.claude/commands/` still works but is the l
 
 Shell substitution: `` !`command` `` runs after argument interpolation. For multi-line shell output, use a fenced code block opened with ` ```! `. Disable shell execution with `disableSkillShellExecution: true` in settings.
 
+**Cost gotcha — shell-substitution-only skills still run inference.** When a user invokes `/skill` whose body is just `` !`bash script.sh` ``, the substitution runs and the resulting bash output becomes a user message that the model still responds to. Without an explicit `model:` field, that inference falls back to the main session model (e.g. Opus). For pure dashboard / script-echo skills, set `model: haiku` + `effort: low` to keep the response cheap. `disable-model-invocation: true` does NOT skip this — it only blocks Claude's auto-invocation.
+
 ## Skill Discovery and the "Overlooking" Problem
 
 Claude discovers skills via description matching, not explicit registration. Known issues:

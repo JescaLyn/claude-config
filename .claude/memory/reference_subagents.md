@@ -59,7 +59,7 @@ Optional:
 - `tools` (allowlist), `disallowedTools` (denylist) — if both set, denylist applied first
 - `model` — `sonnet`/`opus`/`haiku`/full model ID/`inherit` (default: `inherit`)
 - `permissionMode` — `default`/`acceptEdits`/`auto`/`dontAsk`/`bypassPermissions`/`plan`
-- `maxTurns`, `effort` — cap turns or set reasoning effort
+- `maxTurns`, `effort` — cap turns or set reasoning effort. Set `effort: low` on Haiku agents for mechanical work; without it, Haiku still incurs thinking tokens. See `reference_thinking.md`.
 - `skills` — full content injected at startup (not just made available). Cannot preload skills with `disable-model-invocation: true`. Source prefix required: `from-user` (`~/.claude/skills/`), `from-project` (`.claude/skills/`), `from-plugin` (`<plugin>/skills/`). Example:
   ```yaml
   skills:
