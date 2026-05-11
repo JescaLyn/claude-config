@@ -1,6 +1,6 @@
 ---
 name: Subagents
-description: Built-in agents, custom agent definitions, frontmatter fields, model resolution, invocation methods, foreground/background, persistent memory, tool access, spawning workarounds for known bugs
+description: Built-in agents, custom agent definitions, frontmatter fields, model resolution, invocation methods, context isolation (always isolated by default), fork mode (CLAUDE_CODE_FORK_SUBAGENT), foreground/background, persistent memory, tool access, spawning workarounds for known bugs
 type: reference
 ---
 
@@ -84,6 +84,43 @@ Optional:
 4. Main conversation's model (lowest / default)
 
 **Permission inheritance:** Subagents inherit permission context from the main conversation. If parent uses `bypassPermissions` or `acceptEdits`, that takes precedence. If parent uses `auto` mode, subagent inherits `auto` and the `permissionMode` frontmatter is ignored.
+
+## Context Isolation — Subagents Are Always Isolated
+
+**By default, every subagent invocation runs in a fresh, isolated context window.** It does NOT inherit the parent conversation's messages, system prompt, tools, or model state. The subagent only sees: its own system prompt (the agent definition's markdown body), the prompt passed in by `Agent(prompt: ...)`, and basic environment details (cwd, etc.).
+
+From the docs: "Each subagent runs in its own context window with a custom system prompt, specific tool access, and independent permissions" and "Each subagent invocation creates a new instance with fresh context."
+
+**There is no `context: fork` frontmatter field for subagents.** That field is skills-only. Setting it on an agent file is a no-op.
+
+**Implication for `model:` downgrade**: setting `model: haiku|sonnet` on a subagent is always safe — the parent conversation is never squeezed into the subagent's smaller context window because the subagent doesn't see the parent conversation at all. (Contrast with skills, where main-context model downgrade triggers parent auto-compaction.)
+
+## Fork Subagents — Experimental Inverse of Isolation
+
+`CLAUDE_CODE_FORK_SUBAGENT=1` env var enables **fork mode** (Claude Code v2.1.117+, experimental).
+
+A **fork** is a special subagent that *inherits the entire conversation so far* instead of starting fresh: same system prompt, tools, model, and message history as the main session. The fork's own tool calls stay out of the parent conversation; only its final result returns. Use when a named subagent would need too much background to be useful, or for parallel exploration from the same starting point.
+
+**Three behavior changes when enabled:**
+
+1. Claude spawns a fork whenever it would otherwise use the **general-purpose** subagent. Named subagents (Explore, custom agents) still spawn isolated.
+2. Every subagent spawn runs in the background. Set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` to keep them synchronous.
+3. The `/fork` command spawns a fork (overriding its default `/branch` alias).
+
+**Manual invocation:** `/fork <directive>` starts a fork on demand. Fork name derived from the first words of the directive. The fork appears in a panel below the prompt input, runs in the background, and its result arrives in the main conversation when it finishes.
+
+**Prompt cache:** A fork's system prompt + tool definitions are identical to the parent, so its first request reuses the parent's prompt cache. This makes forking cheaper than spawning a fresh general-purpose subagent for tasks that need the same context.
+
+**Worktree isolation:** When the Agent tool spawns a fork, it can pass `isolation: worktree` so the fork's file edits go to a separate git worktree.
+
+**Important:** "Fork" is overloaded in Claude Code and means **opposite things** depending on which surface you're configuring:
+
+| Surface | `fork` semantics |
+|---|---|
+| Skill `context: fork` frontmatter | Run the skill ISOLATED in a subagent (no parent history) |
+| Subagent `CLAUDE_CODE_FORK_SUBAGENT=1` env | Run the subagent WITH parent history (drops isolation) |
+
+Skill `context: fork` adds isolation; subagent fork mode removes isolation. Don't confuse them.
 
 ## Memory Field
 

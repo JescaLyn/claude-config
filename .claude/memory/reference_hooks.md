@@ -198,7 +198,15 @@ PreToolUse hooks reliably restrict tools (native mechanisms are broken). See "Ho
 echo "Destructive SQL blocked" >&2; exit 2
 ```
 
-**JSON `permissionDecision`** — documented (`{"hookSpecificOutput": {"permissionDecision": "allow"|"deny"|"defer"}}`) but not reliably enforced (#4669, #18312). Use exit code 2. `defer` pauses for external processing (process exits with `stop_reason: "tool_deferred"`, resume with `claude -p --resume <session-id>`).
+**JSON `permissionDecision`** — `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"|"deny"|"ask"|"defer", "permissionDecisionReason": "..."}}`. Values:
+- `"allow"` — skip the permission prompt.
+- `"deny"` — block the tool call.
+- `"ask"` — Claude Code displays an interactive yes/no permission prompt to the user with the `permissionDecisionReason` shown. If user approves, the tool runs; if user declines, it's blocked. The prompt is labeled with the hook source (`[User]`/`[Project]`/`[Plugin]`/etc).
+- `"defer"` — for headless/SDK use; process exits with `stop_reason: "tool_deferred"`, resume with `claude -p --resume <session-id>`.
+
+Precedence when multiple PreToolUse hooks return different decisions: `deny` > `defer` > `ask` > `allow`.
+
+Use `"ask"` when the hook wants user confirmation (cleaner UX than exit-code-2-with-retry-window). Use exit code 2 only when blocking with a feedback message for Claude (the model), not the user. Historical note: older versions had `permissionDecision` reliability bugs (#4669, #18312); current docs confirm `"ask"` works in interactive sessions.
 
 **Precedence:** Hook `allow` does NOT bypass `deny` rules. Deny-first enforced.
 

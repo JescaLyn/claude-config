@@ -9,18 +9,13 @@ Use for a single well-scoped task — no phases, no parallel branches.
 
 For multi-phase or parallel work, use an agentic pipeline — see `rules/agentic-pipelines.md`.
 
-## Context Forking
+## Keep Agent Prompts Self-Contained
 
-When spawning an agent, ask: can it succeed with only its explicit data handoff?
+Subagents start with no parent conversation history. Every `Agent(prompt: ...)` must include the data, file paths, prior decisions, and goal context the subagent needs to succeed without parent reasoning. Treat the prompt as briefing a smart colleague who just walked in.
 
-- **Yes** → set `context: fork` on the agent definition. Saves tokens; agent doesn't inherit parent conversation history.
-- **No** → don't fork. Agent needs outer context, reasoning chains, or prior decisions to avoid redoing work. Inheriting context is cheaper than correcting uninformed decisions.
+If a subagent genuinely cannot work without parent conversation, restructure the task so the orchestrator does the context-dependent reasoning and hands the subagent a smaller self-contained job. Fork mode (`CLAUDE_CODE_FORK_SUBAGENT=1`) is the escape hatch but rarely the right answer.
 
-Examples:
-- Fork: analysis agents that receive all needed data (file paths, structured input) in the prompt
-- Don't fork: agents that update a running ledger or need prior findings to maintain coherence
-
-Note: `context: fork` on a **skill** also works — the skill runs as an isolated subagent. Skills with `context: fork` cannot spawn further agents (flat hierarchy).
+See `memory/reference_subagents.md` for full isolation/fork mechanics.
 
 ## Save Useful Agents
 

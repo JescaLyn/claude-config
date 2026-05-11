@@ -1,6 +1,6 @@
 ---
 name: Building agentic pipelines
-description: Hard constraints, concurrency/throughput, queuing modes, model routing, prompt contracts, error handling, effort config, patterns (mega-agent bundling, dispatch-evaluate-refine, quality loop, frozen snapshot), context forking, cost management, known bugs, rate limits, Agent Teams
+description: Hard constraints, concurrency/throughput, queuing modes, model routing, prompt contracts (subagents always isolated — self-contained prompts required), error handling, effort config, patterns (mega-agent bundling, dispatch-evaluate-refine, quality loop, frozen snapshot), worktree isolation, cost management, known bugs, rate limits, Agent Teams
 type: reference
 ---
 
@@ -133,20 +133,22 @@ Use when multiple parallel agents need access to shared state that may be writte
 
 **Trade-off:** Less fresh data, but eliminates race conditions. Use when pipeline moves data sequentially through stages.
 
-## Context Forking
+## Prompt Self-Containment (Subagents Are Always Isolated)
 
-**Question: does the agent need outer context to do its job correctly?**
+Subagents in Claude Code are inherently isolated — `Agent()` creates a fresh context every time. The subagent never sees the parent conversation. So the design question isn't "fork or not fork"; it's **"is my prompt self-contained enough for the subagent to succeed?"**
 
-- **Can the agent succeed with only its explicit data handoff?** → Fork. Saves tokens.
-- **Does it need outer conversation context, reasoning chains, or prior decisions to avoid redoing work?** → Don't fork. Inheriting context is cheaper than allowing the agent to make uninformed decisions and requiring re-work.
-
-The criterion is total token cost, not local scope. Forking is only an optimization if it doesn't cause the agent to make mistakes that require correction later.
+For pipeline design, every Agent prompt must include:
+- All file paths, structured input, and prior outputs the subagent will reference
+- The orchestrator's framing of the goal (not just the local task)
+- Constraints, format expectations, and what "done" looks like
 
 **Examples:**
-- ✅ Fork: plan-agents generates structured plan → phase-1 agent reads plan → phase-2 agent reads phase-1 output. Each has what it needs in its handoff; no prior context needed.
-- ❌ Don't fork: flowsearch evidence-weigher must reference prior findings and reasoning to update a Bayesian ledger correctly. Without that context, it would start fresh and miss coherence.
+- ✅ Self-contained: plan-agents generates structured plan → phase-1 agent receives plan + task spec → phase-2 agent receives plan + phase-1 output. Each subagent's prompt carries everything it needs.
+- ❌ Insufficient: spawning an "evidence-weigher" with just a new claim, expecting it to remember prior weighing decisions. Without explicit handoff of the prior ledger state in the prompt, it starts fresh and breaks coherence. Fix by passing the ledger snapshot in the prompt.
 
-**Worktree isolation:** Use `isolation: worktree` in frontmatter to give a subagent an isolated git worktree copy of the repo. The worktree is auto-cleaned if no changes are made. For external builds, forked subagents can be enabled via `CLAUDE_CODE_FORK_SUBAGENT=1`.
+**When a subagent genuinely needs parent conversation history** (rare): enable fork mode with `CLAUDE_CODE_FORK_SUBAGENT=1`. A fork is a subagent that inherits the parent's full conversation, system prompt, tools, and model — the opposite of normal subagent isolation. Forks replace the general-purpose subagent type when fork mode is on. See `reference_subagents.md` for full mechanics.
+
+**Worktree isolation:** Pass `isolation: worktree` to `Agent()` (or set in frontmatter) to give a subagent an isolated git worktree copy of the repo. Auto-cleaned if no changes are made. Useful for parallel agents that might write to overlapping paths.
 
 ## Cost Management
 

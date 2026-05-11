@@ -14,8 +14,8 @@
 - [reference_permissions.md](reference_permissions.md) — 6 permission modes, auto mode config, Bash hardening, read-only exemptions, Agent(AgentName) syntax, sandbox domains
 
 ## Agentic Pipelines
-- [reference_subagents.md](reference_subagents.md) — Built-in agents, custom agent definitions, frontmatter fields, model resolution, invocation methods, foreground/background, persistent memory, tool access, spawning workarounds for known bugs
-- [reference_subagent_pipelines.md](reference_subagent_pipelines.md) — Hard constraints, concurrency/throughput, queuing modes, model routing, prompt contracts, error handling, patterns, context forking, cost management, Agent Teams, known bugs
+- [reference_subagents.md](reference_subagents.md) — Built-in agents, custom agent definitions, frontmatter fields, context isolation (always isolated), fork mode (CLAUDE_CODE_FORK_SUBAGENT inverse of skill context:fork), model resolution, invocation, memory, tool access, spawning workarounds
+- [reference_subagent_pipelines.md](reference_subagent_pipelines.md) — Hard constraints, concurrency/throughput, queuing modes, model routing, prompt contracts (subagents always isolated), error handling, patterns, worktree isolation, cost management, Agent Teams, known bugs
 
 ## Claude Code Internals
 - [reference_claude_code_session_names.md](reference_claude_code_session_names.md) — Session names NOT in OTel; stored in ~/.claude/; correlate via session.id; cross-machine gap
