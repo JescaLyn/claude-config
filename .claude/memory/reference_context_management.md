@@ -47,14 +47,23 @@ Hook output over 50K characters is saved to disk with a file path + preview inst
 
 ## Context Windows
 
-| Model | Default | Extended |
-|-------|---------|----------|
-| **Opus 4.7** | 200K | 1M (Max, Team, Enterprise, API) |
-| **Opus 4.6** | 200K | 1M (Max, Team, Enterprise, API) |
-| **Sonnet 4.6** | 200K | 1M (Max plan; extra usage on Pro/API) |
-| **Haiku 4.5** | 200K | N/A |
+| Model | Default | Extended | Max Output |
+|-------|---------|----------|-----------|
+| **Opus 4.7** | 200K | 1M (auto on Max/Team/Enterprise; extra usage on Pro) | 128K |
+| **Opus 4.6** | 200K | 1M (auto on Max/Team/Enterprise; extra usage on Pro) | 128K |
+| **Sonnet 4.6** | 200K | 1M (requires opt-in on all plans, including Max/Team) | 64K |
+| **Haiku 4.5** | 200K | N/A | 64K |
 
-On Max/Team/Enterprise plans, Opus auto-upgrades to 1M with no configuration. Use `/context` to inspect current usage. Set `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` to opt out of 1M context support.
+**Critical distinction:** Opus auto-upgrades to 1M on Max/Team/Enterprise with no configuration. Sonnet 4.6 supports 1M but requires explicit opt-in even on Max/Team — it does NOT auto-upgrade. This is why Sonnet sessions appear to have less context than Opus sessions on the same plan.
+
+**Overflow risk for Sonnet and Haiku skills:** Both `model: sonnet` and `model: haiku` skills default to 200K. In an Opus thread past ~150K tokens, invoking a non-forked skill with either model risks auto-compaction destroying conversation state. Mitigation options: use `context: fork` for self-contained skills; use `model: claude-sonnet-4-6[1m]` explicitly in the skill frontmatter for Sonnet skills that need parent context; accept the compaction risk for Haiku (no 1M variant available).
+
+**To enable Sonnet 1M manually:**
+- Per session: `/model sonnet[1m]`
+- Globally: `ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-6[1m]` in your shell environment
+- In skill frontmatter: `model: claude-sonnet-4-6[1m]` (explicit)
+
+Use `/context` to inspect current usage. Set `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` to opt out of 1M context support for Opus.
 
 ## Git Worktrees
 

@@ -86,11 +86,11 @@ Restricts the skill's own main-context calls only — does not propagate into su
 
 Skills, commands, and subagents all support a `model` frontmatter field that overrides the session model. Valid values: `sonnet`, `opus`, `haiku`, or a full model ID. Subagents also accept `inherit` (the default).
 
-### Hidden cost: model downgrade to Haiku risks context overflow (skills only)
+### Hidden cost: model downgrade to Haiku or Sonnet risks context overflow (skills only)
 
-Context windows per model: Opus 4.7 → 1M, Sonnet 4.6 → 1M, Haiku 4.5 → 200K. A skill's `model:` override switches the session model **for the current turn only** — the session model resumes on the next prompt. But if the current conversation already exceeds Haiku's 200K window, the harness cannot send that history to Haiku, and must compact or error before the skill can run.
+Effective context windows per model: Opus 4.7 → 1M (auto), Opus 4.6 → 1M (auto), Sonnet 4.6 → **200K by default** (1M requires opt-in), Haiku 4.5 → 200K. A skill's `model:` override switches the session model **for the current turn only** — the session model resumes on the next prompt. But if the current conversation already exceeds the skill model's window, the harness must compact before the skill can run.
 
-This applies to any Opus 4.7 or Sonnet 4.6 session past ~200K tokens when a Haiku skill (non-forked) is invoked. `model: sonnet` skills are safe in Opus sessions — both have 1M context.
+This applies to any Opus session past ~150K tokens when a non-forked Haiku or Sonnet skill is invoked — both default to 200K. Mitigation: `context: fork` for self-contained skills (most cost-optimization skills); explicit `model: claude-sonnet-4-6[1m]` in frontmatter for Sonnet skills that need parent context. Haiku has no 1M variant — compaction is unavoidable if invoked in an overflowed session.
 
 **Subagents (`.claude/agents/`) do NOT have this problem.** They're inherently isolated — `Agent()` spawns a fresh subagent context that doesn't inherit parent conversation history, so a downgraded subagent model never squeezes the parent. Set `model:` freely on agents.
 
@@ -103,16 +103,16 @@ model: haiku
 context: fork
 ```
 
-`context: fork` runs the skill in a fresh subagent context, so the smaller window is irrelevant — and you avoid the context overflow risk. Without `fork`, `model: haiku` in a long session is a landmine.
+`context: fork` runs the skill in a fresh subagent context, so the smaller window is irrelevant — and you avoid the context overflow risk entirely. Without `fork`, `model: haiku` in a long session is a landmine.
 
 If a skill genuinely needs parent conversation context (orchestration, follow-up work informed by prior decisions), **don't downgrade the model** — let it inherit. Either let it run on the parent's model, or spawn `Agent(model: haiku, ...)` for the cheap parts and stay on the parent model for the orchestrator.
 
 ### Usage habit
 
-- **Long iterative Opus 4.7 or Sonnet 4.6 sessions**: once the conversation is past ~200K tokens, treat `model: haiku` non-fork skills as "save state first" actions. Run such skills in a fresh terminal tab (or `/clear` first) to protect conversation state.
-- **Routine cost-sensitive batch work**: run on Haiku as the *parent* model from the start. Then Haiku skills never trigger context overflow.
-- **Quick / short sessions** (under ~150K tokens): Haiku skills are harmless — well within Haiku's 200K window.
-- **When auditing skills**: any `model: haiku` without `context: fork` is suspect — either the skill is short enough to never matter, or it's a hidden context overflow trap. `model: sonnet` skills are not subject to this (same 1M window as Opus). Agents (`.claude/agents/`) are never subject to this — they're inherently isolated.
+- **Long iterative Opus sessions**: past ~150K tokens, non-forked `model: haiku` and `model: sonnet` skills risk compaction. For Sonnet, use `model: claude-sonnet-4-6[1m]` in the frontmatter to prevent it. For Haiku, save state first or use a forked haiku skill.
+- **Routine cost-sensitive batch work**: run Haiku as the *parent* model from the start. Then Haiku skills never trigger context overflow.
+- **Quick / short sessions** (under ~150K tokens): both Haiku and Sonnet skills are harmless.
+- **When auditing skills**: any `model: haiku` without `context: fork` is suspect — safe only when sessions stay short. `model: sonnet` without `context: fork` carries the same overflow risk (same 200K default). Agents (`.claude/agents/`) are never subject to this — inherently isolated.
 
 ## Skill Orchestration: Full Multi-Agent Pipelines
 
