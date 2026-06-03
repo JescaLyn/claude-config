@@ -17,12 +17,22 @@ If both exist with the same name, the skill takes precedence. There is no behavi
 
 Use `.claude/skills/` for new work. `.claude/commands/` still works but is the legacy path.
 
+## Bundled Skills
+
+Always included: `/code-review` (correctness bugs at chosen effort; `--comment` posts inline PR comments), `/batch`, `/debug`, `/loop`, `/claude-api`, `/run`, `/verify`, `/run-skill-generator`.
+
+Other notable skills: `/ultrareview` (cloud-based parallel multi-agent review; `/ultrareview` or `/ultrareview <PR#>`), `/goal` (set a completion condition; Claude works across turns until met), `/fewer-permission-prompts` / `/less-permission-prompts` (scans transcripts and adds an allowlist to reduce permission prompts).
+
+Built-in slash commands (`/init`, `/review`, `/security-review`) are also invocable via the Skill tool by the model.
+
+`/usage` shows a per-category breakdown of what's driving limits usage — skills, subagents, plugins, and per-MCP-server cost.
+
 ## Skill Storage Locations
 
 - **Enterprise**: Managed settings
 - **Personal**: `~/.claude/skills/<skill-name>/SKILL.md`
 - **Project**: `.claude/skills/<skill-name>/SKILL.md`
-- **Plugin**: `<plugin>/skills/<skill-name>/SKILL.md`
+- **Plugin**: `<plugin>/skills/<skill-name>/SKILL.md` (a plugin's root-level SKILL.md with no `skills/` subdirectory is also surfaced as a skill)
 
 ## Invocation Control
 
@@ -36,7 +46,7 @@ Use `.claude/skills/` for new work. `.claude/commands/` still works but is the l
 
 `user-invocable: false` — only Claude can invoke (hidden from slash menu), description always in context. Use for orchestration primitives that Claude should call but users shouldn't.
 
-**Key frontmatter fields**: `name`, `description`, `argument-hint`, `arguments` (positional args for `$name` substitution), `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `effort`, `context` (isolated execution — see `context: fork` below), `agent` (subagent type when `context: fork`), `hooks`, `paths` (glob pattern or YAML list of globs limiting when skill activates), `shell` ("bash" (default) or "powershell" for `` !`command` `` blocks).
+**Key frontmatter fields**: `name`, `description`, `when_to_use` (additional trigger context, appended to description), `argument-hint`, `arguments` (positional args for `$name` substitution), `disable-model-invocation`, `user-invocable`, `allowed-tools`, `model`, `effort`, `context` (isolated execution — see `context: fork` below), `agent` (subagent type when `context: fork`), `hooks`, `paths` (glob pattern or YAML list of globs limiting when skill activates), `shell` ("bash" (default) or "powershell" for `` !`command` `` blocks).
 
 **String substitutions**: `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N`, `$name`, `${CLAUDE_SESSION_ID}`, `${CLAUDE_SKILL_DIR}` (absolute path to the skill's directory), `${CLAUDE_EFFORT}` (current effort level).
 
@@ -46,21 +56,30 @@ Shell substitution: `` !`command` `` runs after argument interpolation. For mult
 
 ## Skill Discovery and the "Overlooking" Problem
 
-Claude discovers skills via description matching, not explicit registration. Known issues:
-- Skills failing to load from `~/.claude/skills/` (GitHub #25072, closed stale — fix unverified)
-- Skills loaded into context but `/skills` showing "No skills found" (GitHub #14851, closed)
-- Claude not invoking available skills when it should (GitHub #9716, **OPEN**, 69+ comments; also #51099 — Opus 4.7 ignoring skills)
+Claude discovers skills via description matching, not explicit registration. Skills are also discovered from parent directories up to the repo root and nested subdirectories, and from any additional directories added via `--add-dir`.
 
-**Mitigations**:
-- **Description quality is the primary lever.** Write descriptions that match what users naturally say. Include keywords.
+**Mitigations for missed auto-invocation**:
+- **Description quality is the primary lever.** Write descriptions that match what users naturally say. Include keywords. The `when_to_use` field provides additional trigger context.
 - **System-reminder mechanism** lists available skills by name and description at session start. This helps but doesn't guarantee invocation.
-- **Context budget**: skill descriptions get 1% of context window, capped at 1,536 characters per entry. Exceeding the budget excludes some skills; `/context` will warn.
+- **Context budget**: skill descriptions get ~1% of context window by default, capped at 1,536 characters per entry (`maxSkillDescriptionChars`). Exceeding the budget excludes some skills. Increase `skillListingBudgetFraction` in settings if descriptions are truncated. Run `/doctor` for a full breakdown of which skill descriptions are being truncated.
 - **No way to force invocation.** Hooks can't make Claude use a skill. CLAUDE.md reminders help but invocation remains a judgment call.
 - **Test with realistic requests**, not just the skill name. Iterate on descriptions until auto-invocation works reliably.
 
 ## `/skills` UI
 
-The `/skills` panel includes a type-to-filter search box for finding skills by name. Pressing Enter pre-fills `/<skill-name>` in the prompt rather than closing the dialog.
+The `/skills` panel includes a type-to-filter search box for finding skills by name. Pressing Enter pre-fills `/<skill-name>` in the prompt rather than closing the dialog. Press `t` to sort the listing by estimated token count. The slash command and @-mention suggestion list supports mouse hover and click in fullscreen mode.
+
+`/context all` per-skill token estimates use the model's tokenizer and show rounded values. Plugin-sourced skills show the providing plugin's name.
+
+## `skillOverrides` Setting
+
+Per-skill visibility override in `settings.json`:
+
+| Value | Effect |
+|-------|--------|
+| `off` | Hides skill from model and `/` menu entirely |
+| `user-invocable-only` | Hides from model only (still appears in `/` menu) |
+| `name-only` | Collapses description to name only in model context |
 
 ## Live Change Detection
 
@@ -116,7 +135,7 @@ If a skill genuinely needs parent conversation context (orchestration, follow-up
 
 ## Skill Orchestration: Full Multi-Agent Pipelines
 
-**Skills are full orchestrators.** Because skills run in main conversation context, they have access to the `Agent()` tool and can spawn multiple agents in parallel, collect results, validate output quality, and dispatch conditional follow-up work. This is how `/custom-review` works: stages → spawn reviewer → conditionally dispatch fixes → propose commit message.
+**Skills are full orchestrators.** Because skills run in main conversation context, they have access to the `Agent()` tool and can spawn multiple agents in parallel, collect results, validate output quality, and dispatch conditional follow-up work.
 
 **Hierarchy:** Skills (main context) CAN spawn agents; those agents cannot spawn further agents. See `reference_subagent_pipelines.md` for detailed subagent constraints.
 
@@ -134,11 +153,11 @@ Skill invocation (main context):
 
 Skills run in main context and have access to the Skill tool, so a SKILL.md can include "then invoke /other-skill" and Claude will use the Skill tool to do so.
 
-Subagents spawned via Agent() do not have the Skill tool. To pass skill logic into a subagent, use the `skills:` frontmatter field to preload skill content as static instructions.
+Subagents spawned via Agent() have the Skill tool and can invoke project, user, and plugin skills. To pass inline skill logic (not a registered skill) into a subagent, include the instructions directly in the Agent() prompt.
 
-## Known Bugs — ToolSearch Regression
+## Known Issue — ToolSearch in Custom Agents
 
-**GitHub #47598 (OPEN).** Custom agents (`.claude/agents/`) lost access to `MCPSearch` (formerly `ToolSearch`), blocked by a hardcoded `CUSTOM_AGENT_DISALLOWED_TOOLS` list. This breaks access to deferred MCP tools in custom agents. **Workaround:** Set `ENABLE_TOOL_SEARCH=false` to force all MCP tools to load upfront (context cost), or keep total MCP tool descriptions under ~10K tokens so deferral doesn't trigger. Note: `MCPSearch` auto-mode is on by default when MCP tool descriptions exceed 10% of the context window.
+Custom agents (`.claude/agents/`) may lack access to `MCPSearch` (formerly `ToolSearch`) due to a hardcoded disallowed-tools list. This breaks access to deferred MCP tools in custom agents. **Workaround:** Set `ENABLE_TOOL_SEARCH=false` to force all MCP tools to load upfront (context cost), or keep total MCP tool descriptions under ~10K tokens so deferral doesn't trigger. `MCPSearch` auto-mode activates by default when MCP tool descriptions exceed 10% of the context window.
 
 ## When to Use What
 

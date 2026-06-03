@@ -11,26 +11,29 @@ HTML block comments (`<!-- ... -->`) are stripped from all instruction files (CL
 ## Context Compaction
 
 ### /compact
-Summarizes conversation history, replacing full transcript with a condensed version (~5–10% of original). A 70K-token conversation compresses to ~4K tokens.
+Summarizes conversation history, replacing full transcript with a condensed version (~5–10% of original). A 70K-token conversation compresses to ~4K tokens. The compaction prompt instructs the model to preserve sensitive user instructions from CLAUDE.md and rules files.
 
 - Run with focus: `/compact focus on X` to prioritize preserving specific context
 - CLAUDE.md and rules re-load fresh after compaction (load reason: `compact`)
 - Key intent, direction, and conclusions preserved; detailed tool outputs and early instructions may be lost
 
 ### Auto-compaction
-Triggers automatically when context fills up. Clears older tool outputs first, then summarizes if needed. Circuit breaker stops retrying after 3 consecutive failures.
+Triggers automatically when context fills up. Clears older tool outputs first, then summarizes if needed. The first summarize attempt seeds from the original request's overflow size, avoiding a wasted near-full-context retry. Circuit breaker stops retrying after 3 consecutive failures. The auto-compact display shows `auto` (no token count) when compaction fires automatically.
 
-**Skill reattachment after compaction**: the most recently invoked skills are re-attached automatically — first 5,000 tokens each, 25,000-token combined budget. Skill character budget scales with context window (2% of context), so larger context windows surface more skill descriptions without truncation.
+**Skill reattachment after compaction**: the most recently invoked skills are re-attached automatically — first 5,000 tokens each, 25,000-token combined budget (the reattachment token budget scales with context window at 2% of context, so larger windows reattach more skill content).
 
 **Best practice**: put persistent rules in CLAUDE.md, not conversation history — they survive compaction.
 
+### Rewind
+Press `Esc` twice to open the rewind menu. Options include undoing file changes and "Summarize up to here" — compresses earlier context while keeping recent turns intact.
+
 ### Hooks
 
-Hook output over 50K characters is saved to disk with a file path + preview instead of being injected directly into context.
+Hook output over 50K characters is saved to disk with a file path and preview injected into context instead.
 
 | Hook | Matcher values | Can block? | Key input fields |
 |------|---------------|------------|------------------|
-| **PreCompact** | `manual`, `auto` | Yes (exit code 2 cancels compaction) | `trigger`, `custom_instructions` |
+| **PreCompact** | `manual`, `auto` | Yes (exit code 2 or `{"decision":"block"}` return value cancels compaction) | `trigger`, `custom_instructions` |
 | **PostCompact** | `manual`, `auto` | No | `trigger`, `compact_summary` |
 | **SessionStart** | `compact` | No | `source: "compact"` — fires when session resumes after compaction; can inject `additionalContext` via `hookSpecificOutput` |
 | **InstructionsLoaded** | (no matcher) | No | Fires when CLAUDE.md or `.claude/rules/*.md` files are loaded into context |
@@ -65,6 +68,14 @@ Hook output over 50K characters is saved to disk with a file path + preview inst
 
 Use `/context` to inspect current usage. Set `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` to opt out of 1M context support for Opus.
 
+## Prompt Cache TTL
+
+By default Claude Code uses 5-minute prompt cache TTL. Two env vars override this:
+- `ENABLE_PROMPT_CACHING_1H=1` — opt into 1-hour TTL on API key, Bedrock, Vertex, and Foundry
+- `FORCE_PROMPT_CACHING_5M=1` — force 5-minute TTL explicitly
+
+`ENABLE_PROMPT_CACHING_1H_BEDROCK` is deprecated but still honored.
+
 ## Git Worktrees
 
 ### CLI flag
@@ -77,8 +88,16 @@ Use `/context` to inspect current usage. Set `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` 
 ### Sparse checkout
 `worktree.sparsePaths` setting limits checkout to specified directories in large monorepos, using git sparse-checkout. Example: `worktree.sparsePaths: ["src/api", "packages/auth"]`.
 
+### Base branch behavior
+`worktree.baseRef` controls what branch new worktrees branch from:
+- `fresh` (default): branches from `origin/<default-branch>`, ensuring a clean base
+- `head`: branches from local HEAD
+
+### Background session isolation
+`worktree.bgIsolation: 'none'` lets background sessions edit the working copy directly without using `EnterWorktree`. Default behavior isolates background sessions in worktrees.
+
 ### Subagent isolation
-`isolation: "worktree"` on the Agent tool (or agent definition) gives each subagent its own worktree for parallel work without file conflicts. Auto-cleaned when subagent finishes without changes. Worktrees left behind after interrupted parallel runs are also cleaned up automatically.
+`isolate: "worktree"` on the Agent tool (or agent definition) gives each subagent its own worktree for parallel work without file conflicts. Auto-cleaned when subagent finishes without changes. Worktrees left behind after interrupted parallel runs are also cleaned up automatically.
 
 ### Worktree hooks
 - **WorktreeCreate**: fires when worktree created; can provide custom creation logic (supports non-git VCS)
@@ -115,6 +134,7 @@ Permission prompts for Bash/network still appear as in default mode — plan mod
 - **CronCreate**: schedule task (5-field cron expression, prompt, recurrence flag)
 - **CronList**: list all tasks with IDs
 - **CronDelete**: cancel by ID
+- **ScheduleWakeup**: reschedule the next `/loop` iteration (use inside a loop to adjust timing dynamically)
 - Limit: 50 scheduled tasks per session
 
 ### Cloud-scheduled: /schedule (Routines)
@@ -137,9 +157,9 @@ Via Claude desktop app; minimum 1-minute interval; requires app running.
 ### Storage
 Sessions saved as `.jsonl` files in `~/.claude/projects/`, organized by directory hash. Default cleanup: 30 days (`cleanupPeriodDays` setting).
 
-`cleanupPeriodDays` now also covers `~/.claude/tasks/`, `~/.claude/shell-snapshots/`, and `~/.claude/backups/` — not just session files.
+`cleanupPeriodDays` applies to `~/.claude/tasks/`, `~/.claude/shell-snapshots/`, and `~/.claude/backups/` in addition to session files.
 
-**`cleanupPeriodDays: 0`** is now rejected with a validation error (previously silently disabled transcript persistence). Use `99999` to preserve indefinitely.
+**`cleanupPeriodDays: 0`** is rejected with a validation error. Use `99999` to preserve indefinitely.
 
 ### Resume commands
 - `claude --continue` — most recent conversation in current directory (also finds sessions that added the current dir via `/add-dir`)
@@ -170,7 +190,7 @@ Session-scoped permissions are NOT inherited on resume.
 
 ## Checkpointing
 
-Every file edit is snapshotted before applying. Local to session, separate from git. Press `Esc` twice to rewind, or ask Claude to undo. Only covers file changes — not remote system actions.
+Every file edit is snapshotted before applying. Local to session, separate from git. Use the rewind menu (see above) or ask Claude to undo. Only covers file changes — not remote system actions.
 
 ## Context Monitoring
 
@@ -187,6 +207,12 @@ Every file edit is snapshotted before applying. Local to session, separate from 
 - `/context` — inspect what's consuming context space
 - `/mcp` — per-server context costs
 - `/usage` — token usage and spend (merged from `/cost` and `/stats`; both still work as shortcuts to the relevant tab)
-- MCP tool definitions: deferred by default, loaded on demand via `ToolSearch`
-- Skills: descriptions visible at session start; full content loads only on invocation; re-attached after auto-compaction (5K tokens/skill, 25K combined budget)
+- `claude plugin details <name>` — shows a plugin's component inventory and projected per-session token cost
+- Pro users see a footer hint after prompt cache expiry showing roughly how many tokens the next turn will send uncached; the context-low warning is a transient footer notification.
+- Skills:
+  - Descriptions visible at session start; cap is 1536 chars per description; startup warning logged when any are truncated
+  - Full skill content loads only on invocation
+  - Re-attached after auto-compaction (5K tokens/skill, 25K combined budget)
+  - Skill discovery skips gitignored directories (e.g. `node_modules`)
 - Subagents get independent context windows — their work doesn't bloat parent
+- Mentioning files with `@` injects raw content without JSON-escaping, reducing token overhead

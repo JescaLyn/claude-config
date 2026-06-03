@@ -7,85 +7,64 @@ model: sonnet
 
 ## Phase 1 — Research (parallel)
 
-Run all three in a single message (2 Agent calls + 1 Bash call):
+Run all four in a single message (2 Agent calls + 2 Bash calls):
 
-**Agent: docs-fetcher** (haiku, WebFetch + Read)
-
-Fetch current Claude Code documentation. Fetch these pages; for each, extract full text content:
-1. https://code.claude.com/docs/en/hooks
-2. https://code.claude.com/docs/en/skills
-3. https://code.claude.com/docs/en/mcp
-4. https://code.claude.com/docs/en/settings
-5. https://code.claude.com/docs/en/tools
-6. https://code.claude.com/docs/en/context-management
-7. https://code.claude.com/docs/en/thinking
-8. https://code.claude.com/docs/en/subagents
-9. https://code.claude.com/docs/en/permissions
-
-If a URL 404s, try two variants in order: (1) remove `/en/`, (2) try `/reference/` prefix. After 2 failed variants, log and continue.
-
-Output JSON: `{ "fetched_at": "<ISO>", "pages": [{ "url", "status": "ok|error", "content": "<text, max 4000 chars>" }], "fetch_errors": ["<url: reason>"] }`. Keep total output under 12000 tokens.
+**docs-fetcher** — read `~/.claude/skills/refresh-claude-code-reference/agents/docs-fetcher.md` and spawn as Agent (haiku, WebFetch + Read). Self-contained; no additional input needed.
 
 ---
 
-**Agent: changelog-parser** (haiku, Read + Bash)
-
-1. Run `stat -f "%m %Sm" /Users/jessicaterry/.claude/cache/changelog.md` to get last-modified time. If file missing: output `{ "error": "changelog not found" }` and stop.
-2. Read `/Users/jessicaterry/.claude/cache/changelog.md`. Extract all changes relevant to: hooks, skills/commands, MCP, settings, tools, context management, thinking/effort, subagent pipelines, permissions, plugins, bundled skills.
-
-For each change: `{ "version", "category", "description", "type": "new|changed|fixed" }`.
-
-Output JSON: `{ "parsed_at": "<ISO>", "changelog_mtime": "<date from stat>", "changes": [...] }`.
+**changelog-parser** — read `~/.claude/skills/refresh-claude-code-reference/agents/changelog-parser.md` and spawn as Agent (haiku, Read + Bash). Self-contained; no additional input needed.
 
 ---
 
-**memory-inventory** (script)
-
-Run via Bash tool:
+**inventory-memory** (script)
 
 ```bash
-bash ~/.claude/skills/refresh-claude-code-reference/scripts/memory-inventory.sh
+bash ~/.claude/skills/refresh-claude-code-reference/scripts/inventory-memory.sh
 ```
 
 Outputs JSON: `{ "files": [{ "path", "filename", "name", "type", "description" }], "memory_md_content" }`. Capture it.
 
 ---
 
-Collect all three results before proceeding.
+**check-changelog-staleness** (script)
 
-**Changelog staleness check:** Compute the age of `changelog_mtime` against today. If older than 30 days, warn the user: "Changelog cache last updated <date> — may be stale. Consider refreshing it before proceeding." Ask if they want to continue or abort.
+```bash
+bash ~/.claude/skills/refresh-claude-code-reference/scripts/check-changelog-staleness.sh
+```
+
+Outputs JSON: `{ "mtime_date", "age_days", "is_stale", "warning" }`. Capture it.
+
+---
+
+Collect all four results before proceeding.
+
+If `is_stale` is true: warn the user with the `warning` string. Ask if they want to continue or abort.
 
 ## Phase 2 — Architecture check (sequential, two-step)
 
-### Step 2a — Quick pre-check (haiku)
+### Quick pre-check (haiku)
 
-Using only the memory-inventory output (filenames and descriptions — no file reads), answer: does the current set of reference files have any obvious structural problems? Look for:
+Using only the inventory-memory output (filenames and descriptions — no file reads), answer: does the current set of reference files have any obvious structural problems? Look for:
 - Two files whose descriptions are nearly synonymous or heavily overlapping
 - A file whose description suggests it covers two unrelated use cases
 - A file whose description no longer matches its name
 
 Output: `{ "restructure_warranted": true|false, "signals": ["<one-liner per signal>"] }`.
 
-If `restructure_warranted` is false: filter `memory-inventory.files` to `type == "reference"`, use their `path` values as `files_to_update`, set `structural_changes: []` and `description_changes: {}`, and proceed to Phase 3.
+If `restructure_warranted` is false: filter `inventory-memory.files` to `type == "reference"`, use their `path` values as `files_to_update`, set `structural_changes: []` and `description_changes: {}`, and proceed to Phase 3.
 
-### Step 2b — Full review (sonnet, only if Step 2a returned `restructure_warranted: true`)
+### Full review (sonnet, only if pre-check returned `restructure_warranted: true`)
 
-**Agent: architecture-reviewer** (sonnet, Read + Bash + Write)
+Read `~/.claude/skills/refresh-claude-code-reference/agents/architecture-reviewer.md`. Spawn as Agent (sonnet, Read + Bash + Write), prepending to its prompt:
 
-You have the memory-inventory output and the signals from Step 2a. **Operate only on files where `type` is `reference`.** Do not read, modify, or delete files of any other type — those are out of scope.
+```
+## Input: inventory-memory output
+<inventory-memory JSON>
 
-Read all in-scope reference files. For each signal from Step 2a, decide whether to act:
-- Merge: combine two files, preserving all content, updating frontmatter
-- Split: divide one file, ensuring each part has a coherent single scope
-- Rename/redescribe: update frontmatter only, no content move needed
-
-Execute decided changes. Delete source files only after all content is confirmed moved.
-
-Output: `{ "structural_changes": [{ "action": "merge|split|redescribe", "files_affected": [], "reason": "<one-liner>" }], "files_to_update": ["<all reference files now on disk>"], "description_changes": { "<filename>": "<new description if changed>" } }`.
-
-If signals don't hold up on closer inspection: output `{ "structural_changes": [], "files_to_update": ["<current reference file list>"], "description_changes": {} }`.
-
----
+## Input: structural signals from the quick pre-check
+<signals list>
+```
 
 Collect result before proceeding to Phase 3.
 
@@ -134,28 +113,24 @@ Log any docs pages that were not assigned to any file — surface in Final Outpu
 
 ## Phase 4 — Update MEMORY.md index (sequential)
 
-**Agent: memory-index-updater** (haiku, Read + Bash + Write)
+First, run the index diff script:
 
-Inputs from prior phases:
-- `files_to_update` list and `description_changes` map from Phase 2
-- Phase 3 results (which files were written or created)
+```bash
+bash ~/.claude/skills/refresh-claude-code-reference/scripts/diff-memory-index.sh
+```
 
-1. Read `/Users/jessicaterry/.claude/memory/MEMORY.md`
-2. Run `ls /Users/jessicaterry/.claude/memory/*.md` to verify current disk state
-3. Compare:
-   - Files on disk but not indexed → read frontmatter, add entry
-   - Files indexed but not on disk → remove entry
-   - Files in `description_changes` → update their index entry to match new description
-4. Write MEMORY.md only if changes needed. Do not change structure, section headers, or ordering beyond additions/removals.
+Then read `~/.claude/skills/refresh-claude-code-reference/agents/memory-index-updater.md` and spawn as Agent (haiku, Read + Bash + Write), prepending to its prompt:
 
-Output: `{ "status": "updated|up_to_date|error", "added": [], "removed": [], "descriptions_updated": [] }`.
-
----
+```
+## Inputs
+diff: <diff-memory-index.sh output JSON>
+description_changes: <description_changes map from Phase 2>
+```
 
 ## Final Output
 
 Report to user in this order:
-1. **Changelog staleness** — date of cache, warning if stale
+1. **Changelog staleness** — `mtime_date` from check-changelog-staleness.sh, warning if stale
 2. **Structural changes (Phase 2)** — files merged, split, or deleted with reasoning; or "none needed"
 3. **Docs gaps** — any fetched docs pages that matched no reference file
 4. **Updated files** — list with one-liner per change

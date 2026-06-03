@@ -22,8 +22,12 @@ Examples:
 
 **Benefits:**
 - Automatically captures debugging context (version, environment, logs)
+- Includes the conversation before context compaction, so issues from earlier in long sessions are easier to triage
+- Can include recent sessions (last 24 hours or 7 days) for issues that span more than the current session
 - Goes directly to the Claude Code team at Anthropic
 - Helps engineers reproduce and prioritize issues
+
+After completing an in-product survey, a follow-up hint appears prompting you to share more detail via `/feedback`.
 
 **When feedback goes to Anthropic:**
 - `/feedback` — Bug reports, feature requests, issues with Claude Code functionality

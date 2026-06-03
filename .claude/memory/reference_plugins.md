@@ -27,26 +27,83 @@ Plugins live at `~/.claude/plugins/marketplaces/claude-plugins-official/plugins/
 | **superpowers** | 14 workflow skills: TDD, systematic debugging, brainstorming, parallel agents, git worktrees, plans, code review, verification | Medium (14 skills + 85-line contributor CLAUDE.md loaded at session start) | Any serious development project |
 | **chrome-devtools-mcp** | MCP server + 4 skills (chrome-devtools, a11y-debugging, debug-optimize-lcp, troubleshooting) for browser automation, debugging, performance, and accessibility auditing via Chrome DevTools | High — launches a Chrome process; MCP server adds ~35 tools per session | Web development: debugging page behavior, automating browser interactions, a11y audits, Core Web Vitals / LCP optimization |
 
-## Invoking plugin skills
+## Plugin manifest capabilities
 
-Plugin skills are prefixed with the plugin namespace: `/plugin-name:skill-name`. Example: a plugin named `my-plugin` with a skill `hello` is invoked as `/my-plugin:hello`.
+### Skills
+Plugins surface skills in two ways:
+- `skills/` subdirectory containing individual skill files — invoked as `/plugin-name:skill-name`
+- Root-level `SKILL.md` (no `skills/` subdirectory) — the plugin itself is surfaced as a single skill, invoked as `/plugin-name`
+
+### Agents
+Plugin-shipped agents support `effort`, `maxTurns`, and `disallowedTools` in their frontmatter. Output styles support the `keep-coding-instructions` frontmatter field.
+
+### Monitors
+Plugins can ship monitors, declared under `"experimental": { "monitors": [...] }` in the manifest. Top-level `monitors` declarations still load but `claude plugin validate` warns on them. Monitors auto-arm at session start or when a skill from that plugin is invoked.
+
+### Executables
+Plugins can ship executables under a `bin/` directory. These are available as bare commands from the Bash tool without a full path.
+
+### User configuration
+Plugins support `manifest.userConfig` to prompt for configuration at enable time. Fields marked `sensitive: true` are stored in the keychain or a protected credentials file.
+
+### MCP servers
+Plugin MCP servers with unset config variables display a 'config issue' message with a fix hint rather than silently failing.
+
+### Source types
+The `git-subdir` source type points to a subdirectory within a git repo, allowing plugins to live alongside other content in a repo. Marketplace git URLs without a `.git` suffix (Azure DevOps, AWS CodeCommit) are supported. npm sources support custom registries and specific version pinning.
+
+## Plugin CLI commands
+
+| Command | What it does |
+|---------|-------------|
+| `claude plugin install <name>@<marketplace>` | Installs a plugin; auto-refreshes the marketplace and retries before reporting not found |
+| `claude plugin install --plugin-url <url>` | Fetches a plugin `.zip` archive from a URL for the current session only |
+| `claude plugin disable <name>` | Refuses if another enabled plugin depends on the target; provides a copy-pasteable disable-chain hint |
+| `claude plugin enable <name>` | Force-enables transitive dependencies automatically |
+| `claude plugin prune` | Removes orphaned auto-installed plugin dependencies |
+| `claude plugin uninstall --prune` | Uninstalls and cascades to remove now-orphaned dependencies |
+| `claude plugin validate` | Validates manifest; accepts `$schema`, `version`, and `description` at the top level of `marketplace.json` and `$schema` in `plugin.json`; warns on top-level `monitors`/`themes` (use `experimental` key instead) |
+| `claude plugin tag` | Creates release git tags for plugins with version validation |
+
+**`--plugin-dir`** accepts a directory path or a `.zip` archive. To specify multiple directories, repeat the flag — `--plugin-dir path1 --plugin-dir path2`. In headless `--output-format stream-json`, `init.plugin_errors` covers both `--plugin-dir` load failures and dependency demotions.
+
+## Dependency management
+
+Plugins pinned by another plugin's version constraint auto-update to the highest git tag that satisfies the constraint.
+
+## Environment variables
+
+| Variable | What it does |
+|----------|-------------|
+| `CLAUDE_CODE_PLUGIN_PREFER_HTTPS` | Clone GitHub plugin sources over HTTPS instead of SSH — use in environments without a GitHub SSH key |
+| `CLAUDE_CODE_PLUGIN_SEED_DIR` | Pre-seed plugins from a local directory; accepts multiple directories separated by `:` (Unix) or `;` (Windows) |
+
+## Security
+
+`blockedMarketplaces` enforces both `hostPattern` and `pathPattern` entries.
+
+## VSCode
+
+VSCode has native plugin management support. Use the VSCode Claude Code extension UI to install, enable, and disable plugins without editing JSON directly.
+
+## Installed plugins list
+
+The installed plugins list supports search — type to filter by name or description.
 
 ## Per-project plugin enablement
 
 Plugins are **disabled globally by default** to manage overhead. Enable them per-project by adding `enabledPlugins` to the project's `.claude/settings.json`. Settings merge user → project → local.
 
-**Confirmed behavior:**
-- Setting a plugin to `true` in project settings enables it even if absent globally
-- Known bug (issue #25086): `settings.local.json` plugin entries are silently ignored unless the key also exists in `settings.json`
-
-**Confirmed (issues #25086, #27247):** When the key exists in both scopes, project `false` should override global `true`. However the merge is buggy when `enabledPlugins` is absent from the global scope — child entries are silently dropped. **Workaround:** always keep `enabledPlugins` as a key in global `~/.claude/settings.json` (all values `false`), then project overrides work reliably.
+- Setting a plugin to `true` in project settings enables it even if absent globally.
+- `settings.local.json` plugin entries are silently ignored unless the key also exists in `settings.json`.
+- When the key exists in both scopes, project `false` should override global `true`. However the merge is buggy when `enabledPlugins` is absent from the global scope — child entries are silently dropped. **Workaround:** always keep `enabledPlugins` as a key in global `~/.claude/settings.json` (all values `false`), then project overrides work reliably.
 
 ## claudeMdExcludes
 
 - Applies **only to User, Project, and Local memory types** — confirmed does NOT apply to plugin cache CLAUDE.md files
 - Cannot be used to suppress a plugin's contributor guidelines or any plugin-provided CLAUDE.md
 - To suppress a plugin's CLAUDE.md overhead, the only option is to disable the plugin itself
-- Tilde (`~`) does NOT expand in patterns — use absolute paths (issue #19531)
+- Tilde (`~`) does NOT expand in patterns — use absolute paths
 
 ## Recommendations by project type
 
@@ -70,7 +127,7 @@ Remove the entry from `enabledPlugins` in `~/.claude/settings.json`, or set to `
 
 ## Automating new-plugin detection
 
-**No plugin lifecycle hooks exist** (no PostInstall/PreInstall). Feature request: GitHub #11240. Until then, detection requires a workaround.
+**No plugin lifecycle hooks exist** (no PostInstall/PreInstall). Until then, detection requires a workaround.
 
 ### Viable: SessionStart command hook
 A bash script on SessionStart can:

@@ -1,6 +1,6 @@
 ---
 name: Building agentic pipelines
-description: Hard constraints, concurrency/throughput, queuing modes, model routing, prompt contracts (subagents always isolated — self-contained prompts required), error handling, effort config, patterns (mega-agent bundling, dispatch-evaluate-refine, quality loop, frozen snapshot), worktree isolation, cost management, known bugs, rate limits, Agent Teams
+description: Agentic pipeline orchestration — hard constraints (flat hierarchy, no subagent-to-subagent), concurrency/throughput, queuing modes, model routing by task type, self-contained prompt contracts, error handling, effort config table, patterns (mega-agent bundling, dispatch-evaluate-refine, quality loop, frozen snapshot), worktree isolation, cost management, rate limits, Agent Teams. Use this to design and run multi-agent workflows; see reference_subagents.md for agent definition and frontmatter reference.
 type: reference
 ---
 
@@ -8,10 +8,13 @@ type: reference
 
 - **Flat hierarchy**: subagents cannot spawn subagents. One orchestrator + N workers only. Skills and main-context agents are orchestrators; spawned subagents are workers. See `reference_skills.md` for skill orchestration patterns.
 - **Each subagent gets its own context window**, independent of the parent. Size is model and plan dependent (200K default for Sonnet/Opus, 1M for Opus on Max/Team/Enterprise).
-- **Startup overhead**: each subagent loads CLAUDE.md, MCP schemas (connected in parallel), and system prompt. Reduce by stripping unused MCP servers and irrelevant context.
+- **Startup overhead**: each subagent loads CLAUDE.md, MCP schemas (connected in parallel), and system prompt. Reduce by stripping unused MCP servers and irrelevant context. Subagents inherit MCP tools from dynamically-injected servers (servers added at runtime, not just those configured at session start).
 - **Subagents cannot communicate with each other.** All coordination routes through the orchestrator. (Exception: Agent Teams research preview — see "Agent Teams" section.)
+- **`subagent_type` matching** is case- and separator-insensitive (e.g., `'Code Reviewer'` resolves to `'code-reviewer'`).
+- **Agent identity** is tracked via `agent_id` and `parent_agent_id` in OTEL spans and API request headers (`x-claude-code-agent-id` / `x-claude-code-parent-agent-id`).
 - **Agentic pipelines consume significantly more tokens** than single-agent sessions.
-- **Unavailable tools**: `Agent` (flat hierarchy), `Skill` (main-conversation-only), `TodoWrite` (main-conversation-only). All other tools inherited by default.
+- **Unavailable tools**: `Agent` (flat hierarchy), `TodoWrite` (main-conversation-only). All other tools inherited by default. Subagents can use the `Skill` tool and will find project, user, and plugin skills correctly.
+- **Stall timeout**: subagents that stall mid-stream fail with a clear error after 10 minutes instead of hanging silently.
 
 ## Concurrency & Throughput
 
@@ -48,6 +51,8 @@ Sonnet, Opus, and Haiku have separate rate limit pools at the model family level
 **Pipeline-wide halt (raw text):** `authentication_error`, `401`, `quota_exceeded`, `402`, `invalid_request_error.*model not found` — abort, surface exact error.
 4. **Keep return payloads lean.** Return decisions and findings, not logs. Enforce output format in the prompt: "Return ONLY [format]. No explanation, no markdown, no preamble."
 
+**Parallel tool call isolation:** A failing Bash call cancels its siblings. Read, WebFetch, Glob, and other read-only shell commands do not cascade — a failing read-only call leaves sibling calls running. When `gh` commands hit GitHub's API rate limit, the Bash tool surfaces a backoff hint so agents can pause instead of retrying blindly.
+
 ## Prompt Contracts
 
 Every subagent prompt must specify:
@@ -56,14 +61,33 @@ Every subagent prompt must specify:
 3. **Output length constraint** — scale to task type. For extraction/scanning workers: "respond in under 500 tokens." For synthesis/report agents: set a word ceiling appropriate to the task.
 4. **Explicit exclusions** — tell the subagent what is out of scope to prevent it from wandering
 
+## Foreground vs Background Execution
+
+- **Foreground** (default): shows permission prompts; runs synchronously.
+- **Background** (`isolate: true`): no prompts; tools requiring user approval are auto-denied; runs asynchronously.
+
+**Background session lifecycle:** Pinned sessions (`Ctrl+T` in `claude agents`) stay alive when idle, are restarted in place to apply Claude Code updates, and are shed under memory pressure only after non-pinned sessions. Completion notifications include elapsed duration (e.g., "Agent completed · 3h 2m 5s"). Empty idle background sessions left over from navigation are automatically retired by the daemon after 5 minutes. Rename a background session with `Ctrl+R`; the attached session's banner updates immediately.
+
+**`worktree.bgIsolation: "none"` setting:** Lets background sessions edit the working copy directly without `EnterWorktree`, for repos where worktrees are impractical.
+
 ## Subagent Frontmatter Fields
 
-Key fields for custom agent configs (`.claude/agents/<name>.md`):
+Agent files live at `~/.claude/agents/<agent-name>.md` (personal) or `.claude/agents/<agent-name>.md` (project). Key frontmatter fields:
 
-- `tools`: Restrict tool access (e.g., `tools: Read Grep Edit`)
+**Tool inheritance rules:** Setting `tools` gives the subagent *only* those tools. Setting `disallowedTools` removes specific tools from the full inherited set. If both are set, `disallowedTools` takes precedence. If neither is set, the subagent inherits all parent tools.
+
+- `tools`: Restrict tool access to a specific list (e.g., `tools: Read Grep Edit`)
+- `disallowedTools`: Remove specific tools from the inherited set
+- `permissionMode`: Override to a stricter permission mode for this subagent
 - `model`: Route by task complexity — see Model Routing section above
 - `effort`: Per-agent effort override (see Effort Configuration below)
-- `skills`: Preload skills into the subagent. Sources: `from-user` (global `~/.claude/skills/`) or `from-project` (`.claude/skills/`).
+- `maxTurns`: Bound execution length (default unlimited)
+- `preloadSkills`: Inject skills at startup. Sources: `from-user` (global `~/.claude/skills/`) or `from-project` (`.claude/skills/`)
+- `preloadScripts`: Inject scripts at startup
+
+Built-in agent types: `general-purpose` (inherits all parent tools), `coder`, `explore` (read-only: Glob/Grep/Read/LSP only), `plan` (design approach, same tools as Explore), `research`.
+
+Parent deny rules always apply regardless of subagent frontmatter.
 
 ## Effort Configuration
 
@@ -146,9 +170,9 @@ For pipeline design, every Agent prompt must include:
 - ✅ Self-contained: plan-agents generates structured plan → phase-1 agent receives plan + task spec → phase-2 agent receives plan + phase-1 output. Each subagent's prompt carries everything it needs.
 - ❌ Insufficient: spawning an "evidence-weigher" with just a new claim, expecting it to remember prior weighing decisions. Without explicit handoff of the prior ledger state in the prompt, it starts fresh and breaks coherence. Fix by passing the ledger snapshot in the prompt.
 
-**When a subagent genuinely needs parent conversation history** (rare): enable fork mode with `CLAUDE_CODE_FORK_SUBAGENT=1`. A fork is a subagent that inherits the parent's full conversation, system prompt, tools, and model — the opposite of normal subagent isolation. Forks replace the general-purpose subagent type when fork mode is on. See `reference_subagents.md` for full mechanics.
+**When a subagent genuinely needs parent conversation history** (rare): enable fork mode with `CLAUDE_CODE_FORK_SUBAGENT=1`. A fork is a subagent that inherits the parent's full conversation, system prompt, tools, and model — the opposite of normal subagent isolation. Works in non-interactive sessions (SDK and `claude -p`). Forks replace the general-purpose subagent type when fork mode is on. See `reference_subagents.md` for full mechanics.
 
-**Worktree isolation:** Pass `isolation: worktree` to `Agent()` (or set in frontmatter) to give a subagent an isolated git worktree copy of the repo. Auto-cleaned if no changes are made. Useful for parallel agents that might write to overlapping paths.
+**Worktree isolation:** Pass `isolate: worktree` to `Agent()` (or set in frontmatter) to give a subagent an isolated git worktree copy of the repo. Auto-cleaned if no changes are made; stale worktrees left behind by interrupted parallel runs are also automatically cleaned up. Useful for parallel agents that might write to overlapping paths.
 
 ## Cost Management
 
@@ -162,7 +186,7 @@ For pipeline design, every Agent prompt must include:
 
 ### Subscription Rate Limits
 
-Rate limits are subscription-tier dependent. They govern requests per minute (RPM), input tokens per minute (ITPM), and output tokens per minute (OTPM). Build pipelines to maximize concurrency—test at full capacity and scale back only if limits are hit.
+Rate limits are subscription-tier dependent. They govern requests per minute (RPM), input tokens per minute (ITPM), and output tokens per minute (OTPM). Build pipelines to maximize concurrency — test at full capacity and scale back only if limits are hit.
 
 **If you encounter a rate limit error:**
 - Look for HTTP 429 status code or messages like "API Error: Rate limit reached", "You've hit your session limit", or "You've hit your weekly limit"
@@ -178,12 +202,12 @@ Rate limits are subscription-tier dependent. They govern requests per minute (RP
 
 **Custom agent discovery failures.** Agents in `.claude/agents/` are not reliably discovered at session start. Agents do not hot-reload mid-session. Discovery failure produces an explicit error, not silent degradation.
 
-**Custom agent body not injected** (#13627, CLOSED NOT_PLANNED). Even when discovery works, the markdown body of agent files is not passed to spawned subagents. The agent gets correct model and tools but generic behavior. This is why the general-purpose workaround is required (see "Spawning Custom Agents" above).
+**Custom agent body not injected.** The markdown body of agent files is silently ignored when spawning via `subagent_type`. Read the agent file, strip the frontmatter, and include the body manually in the `Agent()` prompt. Use the agent's registered name as `subagent_type` to preserve tool restrictions. See `reference_subagents.md` → Spawning Custom Agents.
 
-**Skill discovery failures.** Skills may fail to load from `~/.claude/skills/` (#25072), show "No skills found" despite correct config (#14851), or not be invoked when relevant (#9716). Mitigations in `reference_skills.md`.
+**Skill discovery in main context.** Skills may fail to load from `~/.claude/skills/` (#25072) or show "No skills found" despite correct config (#14851) in the main conversation context. Subagents using the `Skill` tool correctly find project, user, and plugin skills. Mitigations in `reference_skills.md`.
 
-**ToolSearch blocked for custom agents.** Custom agents in `.claude/agents/` cannot use `ToolSearch` (#47598, OPEN). This blocks deferred MCP tool access. Workaround: `ENABLE_TOOL_SEARCH=false` forces upfront loading, or keep MCP tool descriptions under ~10K tokens.
+**ToolSearch blocked for custom agents.** Custom agents in `.claude/agents/` cannot use `ToolSearch` (#47598). This blocks deferred MCP tool access. Workaround: `ENABLE_TOOL_SEARCH=false` forces upfront loading, or keep MCP tool descriptions under ~10K tokens.
 
 ### Agent Teams
 
-Available in research preview (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Teammates can message each other, claim tasks from a shared list, and coordinate without routing through the orchestrator. Use `SendMessage({to: agentId})` to resume stopped agents. Consumes significantly more tokens than standard subagents. Known limitations: no session resumption for in-process teammates, task status lag, one team per session, no nested teams. Use subagents when tasks are independent and report-back-only; use Agent Teams when subtasks need inter-agent communication.
+Available in research preview (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Teammates can message each other, claim tasks from a shared list, and coordinate without routing through the orchestrator. Use `SendMessage({to: agentId})` to resume stopped agents. `CLAUDE_CODE_SUBAGENT_MODEL` applies to teammate processes. Consumes significantly more tokens than standard subagents. Known limitations: no session resumption for in-process teammates, task status lag, one team per session, no nested teams. Use subagents when tasks are independent and report-back-only; use Agent Teams when subtasks need inter-agent communication.

@@ -96,7 +96,7 @@ Guideline: ~100–150 lines per rule file, one topic each.
 
 - CLAUDE.md files load in full regardless of length (no truncation)
 - Auto-memory (`MEMORY.md`) truncates after 200 lines
-- Skill descriptions get ~1% of context window (fallback: 8,000 characters); each entry capped at 250 characters. When budget is exceeded, descriptions are truncated (not dropped). Override with `SLASH_COMMAND_TOOL_CHAR_BUDGET` env var. Skills with `disable-model-invocation: true` are excluded from the budget entirely.
+- Skill descriptions get ~1% of context window by default; each entry capped at 1,536 characters (`maxSkillDescriptionChars`). When budget is exceeded, descriptions are truncated (not dropped). Skills with `disable-model-invocation: true` are excluded from the budget entirely.
 - **Target**: under 200–500 lines for core CLAUDE.md
 - Longer files reduce adherence and consume tokens on every turn
 
@@ -119,7 +119,16 @@ Fires when any CLAUDE.md or rules file loads. **Observability only — cannot bl
 | `include` | File includes another via `@` |
 | `compact` | Re-load after `/compact` |
 
-Hook input includes: `file_path`, `memory_type` (`"User"`, `"Project"`, `"Local"`, `"Managed"`), `load_reason`, `globs` (for path matches), `trigger_file_path` (for lazy loads), `parent_file_path` (for includes).
+Hook input includes: `file_path`, `memory_type` (`"User"`, `"Project"`, `"Local"`, `"Managed"`), `load_reason`, `globs` (for path matches), `trigger_file_path` (for lazy loads), `parent_file_path` (for includes), `agent_id` and `agent_type` (for subagents).
+
+## HTML Comments
+
+HTML comments (`<!-- ... -->`) in CLAUDE.md are hidden from Claude when the file is auto-injected into context. They are visible only when the file is explicitly read with the Read tool.
+
+## Subagent Behavior
+
+- **Explore and Plan** built-in subagent types skip CLAUDE.md.
+- **Custom subagents** load CLAUDE.md files by default.
 
 ## AGENTS.md Interop
 
@@ -132,6 +141,8 @@ Skills are stored at:
 - `.claude/skills/<skill-name>/SKILL.md` (project)
 
 Frontmatter `context: fork` runs the skill in an isolated subagent rather than inline.
+
+Skill discovery does not load skills from gitignored directories.
 
 ## Hooks
 

@@ -39,9 +39,10 @@ For each phase in `plan.phases` (in order):
 - **Pass phase outputs** as context into the next phase's agent prompts.
 
 Execution constraints:
-- Max 3 concurrent agents per phase; queue excess agents automatically.
-- On 429: defer agents per `plan.rate_limit_contingency`.
+- Run at maximum concurrency — Claude Code queues excess automatically. Scale back only if 429s appear.
+- On 429: halve concurrency, wait for retry-after, then resume.
 - If >50% of agents in a phase fail: halt immediately and surface failure details to user.
+- On any agent status failure: spot-check expected output files before treating as truly failed (subagents can report "failed" even when work completed).
 
 ### 4. Save pipeline (if reusable)
 

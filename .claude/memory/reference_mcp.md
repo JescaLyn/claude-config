@@ -6,7 +6,7 @@ type: reference
 
 ## What MCP Is
 
-MCP (Model Context Protocol) is the only path for users to add genuinely new tools. MCP servers expose tools, resources, and prompts that appear alongside built-ins.
+MCP (Model Context Protocol) is the only path for users to add genuinely new tools. MCP servers expose tools, resources, and prompts that appear alongside built-ins. MCP prompts exposed by a server become slash commands in the form `/mcp__<server>__<prompt>`.
 
 ## Configuration Locations
 
@@ -18,7 +18,7 @@ MCP (Model Context Protocol) is the only path for users to add genuinely new too
 
 `claude mcp add` writes local scope by default (into `~/.claude.json` under the project entry). Use `-s user` for across-all-projects, `-s project` to commit to the repo.
 
-Precedence: `user` > `local` > `project`. A same-named server in user/local scope overrides the `.mcp.json` definition.
+Precedence (highest to lowest): `local` > `project` > `user` > plugin-provided > claude.ai connectors. Same-named servers in higher-precedence scopes override lower-precedence definitions; plugins and connectors are matched by endpoint rather than name. Servers configured both locally and via claude.ai connectors are deduplicated — the local config wins.
 
 ## .mcp.json Format
 
@@ -73,23 +73,35 @@ Supported in `command`, `args`, `env`, `url`, `headers`:
 
 STDIO has lowest latency (<5ms). HTTP supports native OAuth. SSE still works but is not recommended for new servers.
 
-CLI shortcuts: `claude mcp add --transport stdio <name> -- <command>`, `claude mcp add --transport http <name> <url>`, `claude mcp add --transport sse <name> <url>` (deprecated).
+CLI shortcuts: `claude mcp add --transport stdio <name> -- <command>`, `claude mcp add --transport http <name> <url>`, `claude mcp add --transport sse <name> <url>` (deprecated). In JSON configs, `streamable-http` is an alias for `http`.
+
+**Reserved name**: `workspace` is a reserved server name; any existing server with that name is skipped with a warning.
+
+**STDIO environment**: `CLAUDE_PROJECT_DIR` is set in the spawned stdio server's environment.
 
 **Tool description cap**: MCP tool descriptions and server instructions are capped at 2KB to prevent OpenAPI-generated servers from bloating context.
 
 **`headersHelper`**: Alternative to static `headers` — a shell script invoked before each request to generate dynamic auth headers. Use when tokens rotate (e.g. short-lived JWTs). `CLAUDE_CODE_MCP_SERVER_NAME` and `CLAUDE_CODE_MCP_SERVER_URL` are set in the script's environment, allowing one helper to serve multiple servers.
 
+**`.mcp.json` format gotcha**: The file uses a flat format — server names are top-level keys with no wrapper. Using VS Code's `"servers"` wrapper key (or any wrapper) causes `claude mcp list` to silently report no servers.
+
 ## Automatic Reconnection
 
-HTTP and SSE servers reconnect automatically on connection loss:
-- Up to **5 attempts** with exponential backoff (1s base, doubling each attempt)
-- After 5 failed attempts, server is marked as failed
-- For `--print` mode, use `MCP_CONNECTION_NONBLOCKING=true` to skip the MCP connection wait entirely
-- `--mcp-config` server connections are bounded at 5s instead of blocking on the slowest server
+HTTP and SSE servers reconnect and retry automatically:
+- **Connection loss**: up to 5 attempts with exponential backoff (1s base, doubling each attempt); after 5 failures the server is marked as failed
+- **Startup transient errors**: auto-retry up to 3 times instead of staying disconnected
+- **403 on connect**: shown as 'needs auth' in `/mcp` rather than 'failed', prompting the OAuth flow
+- **Reconnect announcements**: re-announced tools are summarized by server prefix rather than flooding the conversation with full tool-name lists
 
-**Startup retries**: Servers that hit a transient error during startup auto-retry up to 3 times instead of staying disconnected.
+For `--print` mode, use `MCP_CONNECTION_NONBLOCKING=true` to skip the MCP connection wait entirely. `--mcp-config` server connections are bounded at 5s instead of blocking on the slowest server.
 
-**Parallel connection**: When a subagent or SDK reconfigures MCP servers, all servers connect in parallel — reducing total startup time proportionally to server count.
+When a subagent or SDK reconfigures MCP servers, all servers connect in parallel — reducing total startup time proportionally to server count.
+
+Non-protocol data streamed by HTTP/SSE servers is capped at 16 MB per SSE frame to prevent unbounded memory growth.
+
+`/mcp` Reconnect picks up `.mcp.json` edits without restarting Claude Code — use Reconnect after editing the file to load changes in the current session.
+
+Backgrounded sessions (`/bg`) preserve `--mcp-config`, `--settings`, `--add-dir`, `--plugin-dir`, and `--strict-mcp-config` flags so MCP servers remain available after backgrounding.
 
 ## Dynamic Tool Updates
 
@@ -111,7 +123,9 @@ When MCP tool descriptions exceed ~10K tokens total, they switch to deferred loa
 - Disabled by default on Vertex AI (opt in with `ENABLE_TOOL_SEARCH`)
 - ToolSearch surfaces tools from servers that connect after session start (nonblocking mode)
 
-**Subagent limitation**: Subagents cannot use deferred MCP tools even when declared in frontmatter. Workarounds:
+**Subagent inheritance**: Subagents inherit MCP tools from dynamically-injected servers (servers added after session start).
+
+**Subagent deferred-tool limitation**: When tool search is active, deferred MCP tools are not accessible in subagents. Workarounds:
 - Set `ENABLE_TOOL_SEARCH=false` to force all MCP tools to load upfront (costs more context)
 - Keep total MCP tool descriptions under ~10K tokens so deferral doesn't trigger
 - Haiku subagents always load tools upfront (no tool search support), so deferral isn't an issue for them
@@ -150,7 +164,7 @@ Hooks can invoke MCP tools directly:
 
 ## Subagent-Scoped MCP Servers
 
-Define in agent frontmatter to limit which subagents load which servers:
+Define in agent frontmatter to limit which servers are loaded — applies to subagents and to main-thread agent sessions launched via `--agent`:
 
 ```yaml
 ---
@@ -205,6 +219,12 @@ First time a project-scoped server (from `.mcp.json`) is used:
 
 Enterprise/org-controlled MCP configuration lives in `managed-mcp.json` (separate from `managed-settings.json`) in system directories. Supports `allowManagedMcpServersOnly`, `allowedMcpServers`, and `deniedMcpServers` policies.
 
+`allowAllClaudeAiMcps` is a managed setting that loads claude.ai cloud MCP connectors alongside `managed-mcp.json` servers for enterprise deployments.
+
+## `claude agents` Flags
+
+`claude agents` accepts `--add-dir`, `--settings`, `--mcp-config`, `--plugin-dir`, `--permission-mode`, `--model`, `--effort`, and `--dangerously-skip-permissions` to configure the dashboard and background sessions dispatched from it.
+
 ## Secret Management for MCP Servers
 
 **Never store credentials in configuration files.** They're too visible (git-tracked `.mcp.json`, readable by Claude in `~/.claude.json`).
@@ -258,7 +278,7 @@ claude mcp add -s user service-name -- ~/.claude/helpers/start-service.sh
 |----------|--------|
 | `MCP_TIMEOUT` | Server startup timeout in ms (e.g. `MCP_TIMEOUT=10000`) |
 | `MCP_TOOL_TIMEOUT` | Per-tool call timeout in ms |
-| `MAX_MCP_OUTPUT_TOKENS` | Raise the 10,000 token warning limit for MCP tool output |
+| `MAX_MCP_OUTPUT_TOKENS` | Override the default 25,000 token limit for MCP tool output (warning fires at 10,000 tokens) |
 | `MCP_CONNECTION_NONBLOCKING=true` | Skip MCP connection wait in `-p` mode |
 | `ENABLE_TOOL_SEARCH` | `auto` (default), `true`, `false`, or `auto:N` |
 | `ENABLE_CLAUDEAI_MCP_SERVERS=false` | Opt out of claude.ai MCP servers |
@@ -266,9 +286,7 @@ claude mcp add -s user service-name -- ~/.claude/helpers/start-service.sh
 
 ## Large Tool Output
 
-By default, Claude Code warns when MCP tool output exceeds 10,000 tokens. To pass larger results (e.g. DB schemas) without truncation, MCP tools can annotate their response with `_meta["anthropic/maxResultSizeChars"]` (up to 500K chars). This bypasses the token-based persist layer for that call.
-
-`MAX_MCP_OUTPUT_TOKENS` env var raises the warning threshold globally.
+Claude Code warns when MCP tool output exceeds 10,000 tokens; the hard default limit is 25,000 tokens. Truncation prompts include format-specific recipes (e.g. `jq` for JSON, computed Read chunk sizes for text). To pass larger results (e.g. DB schemas) without truncation, MCP tools can annotate their response with `_meta["anthropic/maxResultSizeChars"]` (up to 500K chars) in the `tools/list` response. This bypasses the token-based persist layer for that call.
 
 ## Additional CLI Commands
 
@@ -282,7 +300,7 @@ Debug flag: `--mcp-debug` for verbose MCP server error output.
 
 ## Plugin MCP Servers
 
-Use `${CLAUDE_PLUGIN_ROOT}` for bundled files and `${CLAUDE_PLUGIN_DATA}` for persistent state in plugin-provided MCP server configs.
+Use `${CLAUDE_PLUGIN_ROOT}` for bundled files and `${CLAUDE_PLUGIN_DATA}` for persistent state in plugin-provided MCP server configs. If a plugin MCP server has unset required config variables, it shows a `config issue` message with a hint for how to fix it.
 
 ## OAuth
 
@@ -292,9 +310,11 @@ Use `/mcp` to authenticate with remote servers requiring OAuth 2.0. Supports:
 - RFC 9728 Protected Resource Metadata discovery for finding authorization server
 - Pre-configured credentials: `claude mcp add --client-id <id> --client-secret <secret>`
 - Custom metadata URL: `oauth.authServerMetadataUrl` config option for non-standard discovery (e.g. ADFS)
+- `oauth.scopes`: pin specific OAuth scopes as a space-separated string
 - `--callback-port` to fix the redirect URI port for pre-registered apps
 - Manual URL paste fallback: if the automatic localhost redirect fails, paste the callback URL to complete auth
 - Step-up authorization: servers can request elevated scopes via `403 insufficient_scope`; re-consent is triggered automatically
+- `redirectUri` support in `mcp_authenticate` for custom scheme completion and claude.ai connectors
 
 ## Known Issues
 
