@@ -69,7 +69,7 @@ If you don't have an existing `~/.claude/` directory (or want to replace it):
 
 ```sh
 # Clone directly as ~/.claude
-git clone <repo-url> ~/.claude
+git clone https://github.com/JescaLyn/claude-config ~/.claude
 
 # Or symlink from an existing checkout
 ln -s /path/to/claude-config/.claude ~/.claude
