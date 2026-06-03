@@ -1,6 +1,6 @@
 # Claude Code Config
 
-Global Claude Code configuration that gives Claude persistent knowledge of its own extensibility — subagents, skills, tools, hooks, settings, MCP, and context management.
+Global Claude Code configuration that gives Claude persistent knowledge of its own extensibility — skills, subagents, agentic pipelines, hooks, settings, permissions, tools, MCP, plugins, context management, thinking, and more.
 
 ## What's Included
 
@@ -8,9 +8,11 @@ Global Claude Code configuration that gives Claude persistent knowledge of its o
 
 Reference files that load into Claude's context at session start and persist across conversations. Covers every major Claude Code extensibility surface:
 
+- **CLAUDE.md** — discovery, precedence, path-scoped rules, context budget, InstructionsLoaded hook
 - **Hooks** — lifecycle events, hook types, input schemas, blocking behavior, gotchas
 - **Skills** — frontmatter fields, invocation control, discovery, model overrides, skill orchestration
-- **Subagents and pipelines** — agent definitions, context isolation, orchestration patterns, rate limits
+- **Subagents** — agent definitions, context isolation, fork mode, tool access, spawning bugs
+- **Agentic pipelines** — orchestration patterns, concurrency, model routing, error handling, rate limits
 - **MCP** — configuration format, transport types, deferred loading, OAuth, subagent scoping
 - **Settings** — all settings.json fields, scopes, precedence, merge behavior
 - **Permissions** — permission modes, auto mode classifier, Bash hardening, sandbox configuration
@@ -19,6 +21,7 @@ Reference files that load into Claude's context at session start and persist acr
 - **Thinking** — effort levels, all controls, `$CLAUDE_EFFORT` in hooks and skills
 - **Built-in commands** — hardcoded CLI commands that cannot be overridden by skills
 - **Bundled skills** — prompt-based skills that ship with Claude Code, with trigger guidance
+- **Plugins** — plugin manifest capabilities, CLI commands, per-project enablement, known bugs
 
 ### Rules (`rules/`)
 
