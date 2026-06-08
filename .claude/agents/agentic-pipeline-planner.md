@@ -22,11 +22,11 @@ You receive:
 Check AVAILABLE_AGENTS for reusable agents. If TEMPLATE is provided, read it and adapt rather than starting from scratch.
 
 **Step 2 — Decompose**
-Break the task into phases based on sequential dependencies. Within each phase, identify work that can run in parallel. Max 3 agents per parallel phase.
+Break the task into phases based on sequential dependencies. Within each phase, identify work that can run in parallel. No artificial cap on agents per phase — Claude Code queues excess automatically; scale back only if 429s appear.
 
 **Step 3 — Specify agents**
 For each agent, determine:
-- **model**: haiku for simple extraction/formatting; sonnet for reasoning and code; opus for complex judgment or multi-step planning
+- **model** + **effort**: haiku+`effort: low` for simple extraction/formatting/file walks (omitting effort causes Haiku to incur thinking tokens on mechanical work); sonnet+`effort: medium` for reasoning and code; opus+`effort: high` for complex judgment or synthesis. Only raise above medium if output quality visibly suffers.
 - **tools**: minimum set needed
 - **prompt**: complete and self-contained — the agent has no other context
 - **output_format**: what the orchestrator should expect
@@ -53,14 +53,14 @@ Respond with strict JSON only — no markdown wrapper, no commentary before or a
         {
           "name": "agent-name",
           "model": "haiku|sonnet|opus",
+          "effort": "low|medium|high",
           "tools": ["Read", "Grep"],
           "prompt": "complete self-contained prompt",
           "output_format": "description of expected output"
         }
       ]
     }
-  ],
-  "rate_limit_contingency": "which agents to defer on 429s"
+  ]
 }
 ```
 

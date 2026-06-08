@@ -11,7 +11,9 @@ For multi-phase or parallel work, use an agentic pipeline — see `rules/agentic
 
 ## Subagent Isolation
 
-Subagents are always isolated by default — `Agent()` creates a fresh context every time with no parent conversation history. There is no `context: fork` field for agent definitions; setting it on an AGENT.md file is a no-op.
+Named and custom agents are always isolated — `Agent(subagent_type: "my-agent")` starts a fresh context with no parent conversation history. There is no `context: fork` field for agent definitions; setting it on an AGENT.md file is a no-op.
+
+General-purpose subagents are forks by default and inherit parent context. This affects unspecified/automatic subagent delegation, not explicit named-agent calls.
 
 The design question for subagents is not "fork or not" — it's: **is the prompt self-contained enough for the subagent to succeed without knowing what came before?** Make sure the prompt includes all needed data (file paths, structured input, prior decisions).
 

@@ -152,7 +152,7 @@ Bypasses permission prompts for writes to `.claude/`, `.git/`, `.vscode/`, and s
 
 ## Agent Isolation
 
-Agent definitions support `isolate: worktree` to run the agent in an isolated git worktree, keeping its file changes separate from the main working tree.
+Agent definitions support `isolation: worktree` to run the agent in an isolated git worktree, keeping its file changes separate from the main working tree.
 
 ## PowerShell
 

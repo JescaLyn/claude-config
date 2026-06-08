@@ -4,6 +4,7 @@
 - [reference_claude_md.md](reference_claude_md.md) — CLAUDE.md discovery, precedence, path-scoped rules, context budget, InstructionsLoaded hook
 - [reference_settings.md](reference_settings.md) — Settings.json scopes, locations, precedence, merge behavior, key fields, managed policy
 - [reference_context_management.md](reference_context_management.md) — Compaction (auto/manual, hooks, what survives), context windows, worktrees, plan mode, scheduling, session persistence/resume/forking, checkpointing
+- [reference_hook_output_behavior.md](reference_hook_output_behavior.md) — No hook can write persistent user-visible terminal text while allowing inference to continue (intentional design); full channel breakdown with confirmed behavior
 
 ## Extensibility
 - [reference_hooks.md](reference_hooks.md) — Deterministic automation on lifecycle events — all events with matcher values, five hook types, config, source/scope/merge, PreToolUse enforcement, JSON schemas, per-event constraints, gotchas

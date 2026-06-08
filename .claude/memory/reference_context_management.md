@@ -97,7 +97,7 @@ By default Claude Code uses 5-minute prompt cache TTL. Two env vars override thi
 `worktree.bgIsolation: 'none'` lets background sessions edit the working copy directly without using `EnterWorktree`. Default behavior isolates background sessions in worktrees.
 
 ### Subagent isolation
-`isolate: "worktree"` on the Agent tool (or agent definition) gives each subagent its own worktree for parallel work without file conflicts. Auto-cleaned when subagent finishes without changes. Worktrees left behind after interrupted parallel runs are also cleaned up automatically.
+`isolation: "worktree"` on the Agent tool (or agent definition) gives each subagent its own worktree for parallel work without file conflicts. Auto-cleaned when subagent finishes without changes. Worktrees left behind after interrupted parallel runs are also cleaned up automatically.
 
 ### Worktree hooks
 - **WorktreeCreate**: fires when worktree created; can provide custom creation logic (supports non-git VCS)

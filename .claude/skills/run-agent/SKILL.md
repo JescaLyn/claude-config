@@ -13,11 +13,13 @@ Resolve the agent file path:
 **Agent file:** (resolved path above)
 **Model:** !`case "$0" in /*|./*|../*) f="$0";; *) f=".claude/agents/$0.md"; [ -f "$f" ] || f="$HOME/.claude/agents/$0.md";; esac; awk '/^---$/{n++; next} n==1 && /^model:/{print $2; exit}' "$f"`
 **Agent name:** !`case "$0" in /*|./*|../*) f="$0";; *) f=".claude/agents/$0.md"; [ -f "$f" ] || f="$HOME/.claude/agents/$0.md";; esac; awk '/^---$/{n++; next} n==1 && /^name:/{print $2; exit}' "$f"`
+**Isolation:** !`case "$0" in /*|./*|../*) f="$0";; *) f=".claude/agents/$0.md"; [ -f "$f" ] || f="$HOME/.claude/agents/$0.md";; esac; awk '/^---$/{n++; next} n==1 && /^isolation:/{print $2; exit}' "$f"`
 
 Call the Agent tool with:
 - `subagent_type`: the agent name shown above — this enforces the agent's `tools:` restrictions; the body is injected manually via the prompt below
 - `model`: the model shown above
 - `run_in_background`: use the value the caller specified, or false if not specified
+- `isolation`: the Isolation value above if non-empty (e.g. `worktree`), otherwise omit
 - `prompt`: the AGENT PROMPT block below, verbatim
 
 ===== BEGIN AGENT PROMPT =====

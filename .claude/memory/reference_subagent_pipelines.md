@@ -64,7 +64,7 @@ Every subagent prompt must specify:
 ## Foreground vs Background Execution
 
 - **Foreground** (default): shows permission prompts; runs synchronously.
-- **Background** (`isolate: true`): no prompts; tools requiring user approval are auto-denied; runs asynchronously.
+- **Background** (pass `run_in_background: true` on the Agent tool call): no prompts; tools requiring user approval are auto-denied; runs asynchronously. No frontmatter equivalent — background is invocation-time only.
 
 **Background session lifecycle:** Pinned sessions (`Ctrl+T` in `claude agents`) stay alive when idle, are restarted in place to apply Claude Code updates, and are shed under memory pressure only after non-pinned sessions. Completion notifications include elapsed duration (e.g., "Agent completed · 3h 2m 5s"). Empty idle background sessions left over from navigation are automatically retired by the daemon after 5 minutes. Rename a background session with `Ctrl+R`; the attached session's banner updates immediately.
 
@@ -84,6 +84,7 @@ Agent files live at `~/.claude/agents/<agent-name>.md` (personal) or `.claude/ag
 - `maxTurns`: Bound execution length (default unlimited)
 - `preloadSkills`: Inject skills at startup. Sources: `from-user` (global `~/.claude/skills/`) or `from-project` (`.claude/skills/`)
 - `preloadScripts`: Inject scripts at startup
+- `isolation`: `worktree` — gives the subagent an isolated git worktree copy; pass on the Agent tool call for reliable control (frontmatter form has bug #50357 with `claude --agent`)
 
 Built-in agent types: `general-purpose` (inherits all parent tools), `coder`, `explore` (read-only: Glob/Grep/Read/LSP only), `plan` (design approach, same tools as Explore), `research`.
 
@@ -157,9 +158,9 @@ Use when multiple parallel agents need access to shared state that may be writte
 
 **Trade-off:** Less fresh data, but eliminates race conditions. Use when pipeline moves data sequentially through stages.
 
-## Prompt Self-Containment (Subagents Are Always Isolated)
+## Prompt Self-Containment
 
-Subagents in Claude Code are inherently isolated — `Agent()` creates a fresh context every time. The subagent never sees the parent conversation. So the design question isn't "fork or not fork"; it's **"is my prompt self-contained enough for the subagent to succeed?"**
+Named and custom subagents are always isolated — `Agent(subagent_type: "my-agent")` creates a fresh context with no parent history. General-purpose subagents are forks by default and inherit parent context, but pipeline workers should still be self-contained: they run in parallel, can't share state mid-execution, and must carry everything they need in their prompt. The design question is **"is my prompt self-contained enough for the subagent to succeed in isolation?"** — because even fork subagents need explicit context about prior phase outputs, file paths, and output format.
 
 For pipeline design, every Agent prompt must include:
 - All file paths, structured input, and prior outputs the subagent will reference
@@ -170,9 +171,7 @@ For pipeline design, every Agent prompt must include:
 - ✅ Self-contained: plan-agents generates structured plan → phase-1 agent receives plan + task spec → phase-2 agent receives plan + phase-1 output. Each subagent's prompt carries everything it needs.
 - ❌ Insufficient: spawning an "evidence-weigher" with just a new claim, expecting it to remember prior weighing decisions. Without explicit handoff of the prior ledger state in the prompt, it starts fresh and breaks coherence. Fix by passing the ledger snapshot in the prompt.
 
-**When a subagent genuinely needs parent conversation history** (rare): enable fork mode with `CLAUDE_CODE_FORK_SUBAGENT=1`. A fork is a subagent that inherits the parent's full conversation, system prompt, tools, and model — the opposite of normal subagent isolation. Works in non-interactive sessions (SDK and `claude -p`). Forks replace the general-purpose subagent type when fork mode is on. See `reference_subagents.md` for full mechanics.
-
-**Worktree isolation:** Pass `isolate: worktree` to `Agent()` (or set in frontmatter) to give a subagent an isolated git worktree copy of the repo. Auto-cleaned if no changes are made; stale worktrees left behind by interrupted parallel runs are also automatically cleaned up. Useful for parallel agents that might write to overlapping paths.
+**Worktree isolation:** Pass `isolation: "worktree"` to `Agent()` when parallel agents in a phase write to overlapping file paths — frontmatter form is also supported but not reliable via `claude --agent` (bug #50357). Auto-cleaned if no changes made. See `reference_subagents.md` → "When to Use `isolation: worktree`" for the full decision guide and known bugs.
 
 ## Cost Management
 
@@ -204,9 +203,13 @@ Rate limits are subscription-tier dependent. They govern requests per minute (RP
 
 **Custom agent body not injected.** The markdown body of agent files is silently ignored when spawning via `subagent_type`. Read the agent file, strip the frontmatter, and include the body manually in the `Agent()` prompt. Use the agent's registered name as `subagent_type` to preserve tool restrictions. See `reference_subagents.md` → Spawning Custom Agents.
 
+**`model:` frontmatter ignored when spawned via Agent tool (#44385).** The `model:` field in agent definitions is silently ignored; subagents inherit the parent model. Use `CLAUDE_CODE_SUBAGENT_MODEL` env var or pass `model` explicitly in the Agent call.
+
 **Skill discovery in main context.** Skills may fail to load from `~/.claude/skills/` (#25072) or show "No skills found" despite correct config (#14851) in the main conversation context. Subagents using the `Skill` tool correctly find project, user, and plugin skills. Mitigations in `reference_skills.md`.
 
 **ToolSearch blocked for custom agents.** Custom agents in `.claude/agents/` cannot use `ToolSearch` (#47598). This blocks deferred MCP tool access. Workaround: `ENABLE_TOOL_SEARCH=false` forces upfront loading, or keep MCP tool descriptions under ~10K tokens.
+
+**Worktree isolation bugs.** Three open issues affect `isolation: worktree` reliability: #51596 (stale branch reuse on agentId collision), #41368 (branches from `main` instead of current HEAD), #57847 (Windows: writes leak to parent checkout). Spot-check worktree branch state before trusting isolation. See `reference_subagents.md` → Background Session Worktree Behavior for details and workarounds.
 
 ### Agent Teams
 

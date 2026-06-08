@@ -34,16 +34,43 @@ Agent files are stored as `~/.claude/agents/<agent-name>.md` (personal/global) o
 ## Foreground vs Background
 
 - **Foreground**: blocks main conversation; permission prompts pass through. Press `Ctrl+B` to move a running foreground task to background.
-- **Background** (`isolate: true` in frontmatter): runs concurrently; no permission prompts; tools needing approval are auto-denied; async. Completion notifications include elapsed duration (e.g. "Agent completed · 3h 2m 5s").
+- **Background** (pass `run_in_background: true` on the Agent tool call): runs concurrently; no permission prompts; tools needing approval are auto-denied; async. Completion notifications include elapsed duration (e.g. "Agent completed · 3h 2m 5s"). Background is invocation-time only — there is no frontmatter equivalent (`background: true` was proposed in issue #22034 but marked "not planned").
 - Pinned background sessions (`Ctrl+T` in `claude agents`) stay alive when idle and are restarted in place to apply Claude Code updates. They preserve the model and effort level set after waking from idle. Sessions shed under memory pressure are non-pinned first.
 - Empty idle background sessions left over from `←` are automatically retired by the daemon after 5 minutes.
 - Background sessions support `/resume` and appear alongside interactive sessions in session lists.
 - Renaming a background session with `Ctrl+R` updates the attached session's banner immediately.
 - Disable all background tasks: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`.
 
+## Worktree Isolation (`isolation: worktree`)
+
+Pass `isolation: worktree` to give the agent its own git worktree copy of the repo — file edits are isolated from the working tree and other parallel agents. The frontmatter form has a known limitation (bug #50357 — see Background Session Worktree Behavior below); prefer passing `isolation: "worktree"` on the Agent tool call directly for reliable control.
+
+## When to Use `isolation: worktree`
+
+**Use it when:** Two or more parallel agents will write to overlapping file paths. Without isolation, their edits race and corrupt each other.
+
+**Skip it when:**
+- Agents are read-only — no file conflict risk
+- Agents write to disjoint paths (each agent owns a separate file/directory) — no conflict without isolation
+- You're on Windows — bug #57847 breaks isolation entirely (writes leak to parent checkout)
+- You need agents to see each other's writes — worktrees are isolated by design
+- The open bugs (#51596, #41368) are unacceptable for your use case — spot-check branch state first
+
+**Cost:** Each worktree is a full git checkout. Non-trivial disk and I/O overhead per agent. Auto-cleaned when the agent finishes without changes. Note: bug #51596 means stale branches may be reused rather than cleaned on agentId collision.
+
+**Passing it:** Pass `isolation: "worktree"` on the `Agent()` tool call for reliable per-invocation control. Frontmatter (`isolation: worktree`) is also supported but not respected when invoked via `claude --agent` (bug #50357).
+
 ## Background Session Worktree Behavior
 
 By default, background sessions isolate edits in a git worktree. Set `worktree.bgIsolation: "none"` in settings to let background sessions edit the working copy directly without requiring `EnterWorktree`.
+
+`EnterWorktree` can switch between Claude-managed worktrees mid-session. Worktrees managed by Claude are left unlocked when the agent finishes (enabling `git worktree remove`/`prune`). Gitignored outputs from worktree-isolated subagents are preserved.
+
+**Worktree isolation known bugs:**
+- **#50357** — `isolation: worktree` frontmatter not respected when agent invoked via `claude --agent`. Only takes effect via the Agent tool call. Workaround: pass `isolation: "worktree"` on the Agent call directly.
+- **#51596** — Worktree reuses stale branches on agentId collision; subagent silently inherits leftover changes from days-old work. Spot-check branch state before trusting isolation.
+- **#41368** — Worktree branches from `main` instead of current HEAD; subagent misses commits on feature branches. Use `worktree.baseRef` setting to choose the correct base.
+- **#57847** (Windows) — Worktree-isolated subagents may leak Edit/Write to parent checkout, breaking isolation entirely.
 
 ## Disabling Specific Subagents
 
@@ -85,7 +112,7 @@ Optional:
 - `mcpServers` — define inline (scoped) or reference by name (reuses global config)
 - `hooks` — fires when running as a main-thread agent via `--agent`. Stop/SubagentStop hook input includes `background_tasks` and `session_crons` fields.
 - `memory`
-- `isolate` — `true`: always run as background task (no permission prompts, auto-denied if approval needed, async); `worktree`: subagent gets isolated git worktree copy, auto-cleaned if no changes
+- `isolation` — `worktree`: subagent gets an isolated git worktree copy, auto-cleaned if no changes. Note: not respected when invoked via `claude --agent` (bug #50357) — only works via the Agent tool call.
 - `color` — `red`/`blue`/`green`/`yellow`/`purple`/`orange`/`pink`/`cyan`
 - `additionalDirectories` — extra directories the subagent can access
 - `initialPrompt` — auto-submitted as first user turn when agent runs as main session
@@ -99,23 +126,27 @@ Optional:
 3. Subagent definition's `model` frontmatter field
 4. Main conversation's model (lowest / default)
 
+**Known bug (#44385):** The `model:` frontmatter field is silently ignored when subagents are spawned via the Agent tool — subagents inherit the parent model regardless. Workaround: pass `model` explicitly in the Agent tool call or use the `CLAUDE_CODE_SUBAGENT_MODEL` env var (both reliably override).
+
 **Permission inheritance:** Subagents inherit permission context from the main conversation. If parent uses `bypassPermissions` or `acceptEdits`, that takes precedence. If parent uses `auto` mode, subagent inherits `auto` and the `permissionMode` frontmatter is ignored.
 
-## Context Isolation — Subagents Are Always Isolated
+## Context Isolation
 
-**By default, every subagent invocation runs in a fresh, isolated context window.** It does NOT inherit the parent conversation's messages, system prompt, tools, or model state. The subagent only sees: its own system prompt (the agent definition's markdown body), the prompt passed in by `Agent(prompt: ...)`, and basic environment details (cwd, etc.).
+**Named and custom agents always run in a fresh, isolated context window.** They do NOT inherit the parent conversation's messages, system prompt, tools, or model state. The subagent only sees: its own system prompt (the agent definition's markdown body), the prompt passed in by `Agent(prompt: ...)`, and basic environment details (cwd, etc.).
+
+**General-purpose subagent invocations are forks by default in interactive sessions.** Both explicit `Agent(subagent_type: "general-purpose")` calls and automatic general-purpose delegation inherit the full parent conversation instead of starting fresh. Named/custom agents (`subagent_type: "my-agent"`) are still always isolated.
 
 **There is no `context: fork` frontmatter field for subagents.** That field is skills-only. Setting it on an agent file is a no-op.
 
-**Implication for `model:` downgrade**: setting `model: haiku|sonnet` on a subagent is always safe — the parent conversation is never squeezed into the subagent's smaller context window because the subagent doesn't see the parent conversation at all. (Contrast with skills, where main-context model downgrade triggers parent auto-compaction.)
+**Named subagent model doesn't affect the parent context window.** Because named subagents never see the parent conversation, setting `model: haiku` on a named subagent won't trigger parent auto-compaction (contrast with skills, where model downgrade does trigger it). Note: `model:` frontmatter is currently silently ignored via the Agent tool (bug #44385 in Model Resolution Order above) — pass model explicitly in the Agent call instead.
 
 ## Fork Subagents — Inverse of Isolation
 
-`CLAUDE_CODE_FORK_SUBAGENT=1` env var enables **fork mode**. Works in both interactive and non-interactive sessions (SDK, `claude -p`).
+**Fork mode is enabled by default in interactive sessions.** Set `CLAUDE_CODE_FORK_SUBAGENT=0` to disable, `1` to re-enable explicitly. It also works in non-interactive sessions (SDK, `claude -p`).
 
 A **fork** is a special subagent that *inherits the entire conversation so far* instead of starting fresh: same system prompt, tools, model, and message history as the main session. The fork's own tool calls stay out of the parent conversation; only its final result returns. Use when a named subagent would need too much background to be useful, or for parallel exploration from the same starting point.
 
-**Three behavior changes when enabled:**
+**Three behavior changes (active by default):**
 
 1. Claude spawns a fork whenever it would otherwise use the **general-purpose** subagent. Named subagents (Explore, custom agents) still spawn isolated.
 2. Every subagent spawn runs in the background and shows permission prompts (unlike regular background tasks which auto-deny). Set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` to keep them synchronous.
@@ -125,14 +156,14 @@ A **fork** is a special subagent that *inherits the entire conversation so far* 
 
 **Prompt cache:** A fork's system prompt + tool definitions are identical to the parent, so its first request reuses the parent's prompt cache. This makes forking cheaper than spawning a fresh general-purpose subagent for tasks that need the same context.
 
-**Worktree isolation:** When the Agent tool spawns a fork, it can pass `isolate: worktree` so the fork's file edits go to a separate git worktree.
+**Worktree isolation:** When the Agent tool spawns a fork, it can pass `isolation: "worktree"` so the fork's file edits go to a separate git worktree.
 
 **Important:** "Fork" is overloaded in Claude Code and means **opposite things** depending on which surface you're configuring:
 
 | Surface | `fork` semantics |
 |---|---|
 | Skill `context: fork` frontmatter | Run the skill ISOLATED in a subagent (no parent history) |
-| Subagent `CLAUDE_CODE_FORK_SUBAGENT=1` env | Run the subagent WITH parent history (drops isolation) |
+| Subagent `CLAUDE_CODE_FORK_SUBAGENT` env (`0`=disable, `1`=re-enable) | Default-on: runs general-purpose subagents WITH parent history |
 
 Skill `context: fork` adds isolation; subagent fork mode removes isolation. Don't confuse them.
 
@@ -144,7 +175,6 @@ Skill `context: fork` adds isolation; subagent fork mode removes isolation. Don'
 - `local` → `.claude/agent-memory-local/<name>/`
 
 When memory is enabled: system prompt includes instructions + first 200 lines or 25 KB of MEMORY.md. Read/Write/Edit tools auto-enabled.
-
 
 ## Tool Access
 
@@ -161,7 +191,7 @@ When memory is enabled: system prompt includes instructions + first 200 lines or
 Agent body content is not injected when spawning via `subagent_type` — the markdown body is silently ignored. Tool restrictions (`tools:`, `disallowedTools:`) are enforced as a hard capability constraint, not a prompt instruction. Use the agent's registered name as `subagent_type` and include the body manually in the `prompt`:
 
 1. **Read** `~/.claude/agents/<name>.md` (or `.claude/agents/<name>.md`) with the Read tool.
-2. **Extract** the `model` and `name` fields from YAML frontmatter.
+2. **Extract** the `model` and `name` fields from YAML frontmatter. (This is the #44385 workaround — `model:` in frontmatter is ignored unless passed explicitly in the Agent call.)
 3. **Strip** the frontmatter — keep only the markdown body.
 4. **Call** the Agent tool:
 

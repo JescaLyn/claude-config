@@ -33,7 +33,7 @@ Parse the JSON plan from planner output before proceeding.
 
 For each phase in `plan.phases` (in order):
 
-- **Spawn agents in parallel** — one `Agent()` call per agent in the phase, all in one message.
+- **Spawn agents in parallel** — one `Agent()` call per agent in the phase, all in one message. Pass each agent's `model` from the plan (`effort` is frontmatter-only, not a call parameter). Pass `isolation: "worktree"` on each call if agents in this phase write to overlapping file paths; skip it if they are read-only or write to disjoint paths.
 - **Collect all outputs** before starting the next phase.
 - **Validate each output**: non-empty, matches expected `output_format`. On failure, retry once with narrower scope. Log: `"Agent <name> failed in phase <phase>: <error>; retrying with narrower scope."` If retry fails, log and continue with partial output.
 - **Pass phase outputs** as context into the next phase's agent prompts.
